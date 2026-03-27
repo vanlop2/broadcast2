@@ -1,0 +1,25 @@
+{
+  "name": "discord-broadcast-bot",
+  "version": "1.0.0",
+  "description": "بوت ديسكورد احترافي للبرودكاست مع نظام جدولة وإدارة متكامل",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.7",
+    "node-cron": "^3.0.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "broadcast"
+  ],
+  "author": "Developer",
+  "license": "MIT"
+}
