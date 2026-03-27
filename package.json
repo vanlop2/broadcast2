@@ -1,17 +1,20 @@
 {
-  "name": "broadcast-bot",
+  "name": "broadcast-bot-pro",
   "version": "2.0.0",
-  "description": "Professional Discord Broadcast Bot with Components V2",
+  "description": "بوت برودكاست احترافي بتصميم بشري فاخر",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js"
   },
   "dependencies": {
-    "discord.js": "^14.18.0",
-    "dotenv": "^16.4.7"
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.7",
+    "node-cron": "^3.0.3"
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "author": "Developer",
+  "license": "MIT"
 }
