@@ -1,7 +1,7 @@
 {
-  "name": "discord-broadcast-bot",
-  "version": "1.0.0",
-  "description": "بوت ديسكورد احترافي للبرودكاست مع نظام جدولة وإدارة متكامل",
+  "name": "broadcast-bot-pro",
+  "version": "2.0.0",
+  "description": "بوت برودكاست احترافي بتصميم بشري فاخر",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -15,11 +15,6 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "keywords": [
-    "discord",
-    "bot",
-    "broadcast"
-  ],
   "author": "Developer",
   "license": "MIT"
 }
