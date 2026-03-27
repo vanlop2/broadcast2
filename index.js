@@ -1,75 +1,87 @@
-// ═══════════════════════════════════════════════════════
-//  بوت البرودكاست الاحترافي — نسخة بتصميم بشري فاخر
-//  كل التفاصيل مصممة يدوياً بعناية
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  بوت البرودكاست الاحترافي — Components V2 Edition
+//  discord.js v14.18+ | مارس 2025
+//  كل الرسائل مبنية بـ Components V2 — بدون Embeds تقليدية
+// ═══════════════════════════════════════════════════════════════
 
+// ─── استيراد المكتبات — مرتب أبجدياً ───
 const {
-    Client,
-    GatewayIntentBits,
-    EmbedBuilder,
     ActionRowBuilder,
-    StringSelectMenuBuilder,
+    ActivityType,
     ButtonBuilder,
     ButtonStyle,
-    ActivityType,
+    Client,
+    ComponentType,
+    ContainerBuilder,
+    EmbedBuilder,
+    GatewayIntentBits,
+    MediaGalleryBuilder,
+    MediaGalleryItemBuilder,
     MessageFlags,
-    ComponentType
+    ModalBuilder,
+    SectionBuilder,
+    SeparatorBuilder,
+    SeparatorSpacingSize,
+    StringSelectMenuBuilder,
+    TextDisplayBuilder,
+    TextInputBuilder,
+    TextInputStyle,
+    ThumbnailBuilder
 } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-// ─── الإعدادات الأساسية ───
-const PREFIX = '#';
-const TOKEN = process.env.TOKEN;
-const OWNER_ID = process.env.OWNER_ID;
-const DATA_FILE = path.join(__dirname, 'data.json');
-const COLLECTOR_TIMEOUT = 300000; // 5 دقائق
-const DM_DELAY = 1200; // تأخير بين كل DM
+// ═══════════════════════════════════════════════════════════════
+//  CONFIG — كل الإعدادات في مكان واحد
+// ═══════════════════════════════════════════════════════════════
 
-// ─── ثيم التصميم الموحد ───
-const THEME = {
-    MAIN: 0x2B2D31,
-    ACCENT: 0x5865F2,
-    GLOW: 0x57F287,
-    WARM: 0xFEE75C,
-    ROSE: 0xED4245,
-    SOFT: 0xEB459E,
-    FROST: 0x5865F2,
-    GOLD: 0xF0B232,
-    NIGHT: 0x23272A
+const CONFIG = {
+    // ─── أساسيات ───
+    PREFIX: '#',
+    TOKEN: process.env.TOKEN,
+    OWNER_ID: process.env.OWNER_ID,
+
+    // ─── توقيتات ───
+    DM_DELAY: 1200,
+    COLLECTOR_TIMEOUT: 300000,
+
+    // ─── ثيم الألوان — كل لون له معنى ───
+    THEME: {
+        PRIMARY: 0x5865F2,    // أزرق ديسكورد — العنصر الأساسي
+        SUCCESS: 0x57F287,    // أخضر — نجاح
+        WARNING: 0xFEE75C,    // أصفر — تنبيه
+        DANGER: 0xED4245,     // أحمر — خطأ / خطر
+        INFO: 0x5865F2,       // أزرق — معلومة
+        MUTED: 0x2B2D31,      // رمادي غامق — خلفية
+        PINK: 0xEB459E,       // وردي — جدولة
+        GOLD: 0xF0B232,       // ذهبي — إدارة
+        LOG_SUCCESS: 0x57F287,
+        LOG_WARNING: 0xFEE75C,
+        LOG_ERROR: 0xED4245,
+        LOG_MUTED: 0x95A5A6
+    },
+
+    // ─── خيارات الجدولة الجاهزة ───
+    SCHEDULE_OPTIONS: [
+        { label: 'الحين', value: 'now', emoji: '⚡', ms: 0 },
+        { label: 'بعد 30 دقيقة', value: '30m', emoji: '⏱️', ms: 30 * 60 * 1000 },
+        { label: 'بعد ساعة', value: '1h', emoji: '🕐', ms: 60 * 60 * 1000 },
+        { label: 'بعد 3 ساعات', value: '3h', emoji: '🕒', ms: 3 * 60 * 60 * 1000 },
+        { label: 'بعد 6 ساعات', value: '6h', emoji: '🕕', ms: 6 * 60 * 60 * 1000 },
+        { label: 'بعد 12 ساعة', value: '12h', emoji: '🕛', ms: 12 * 60 * 60 * 1000 },
+        { label: 'غداً — حدد الساعة', value: 'tomorrow', emoji: '📅', ms: null },
+        { label: 'تاريخ مخصص', value: 'custom', emoji: '🗓️', ms: null }
+    ],
+
+    // ─── مسار ملف البيانات ───
+    DATA_FILE: path.join(__dirname, 'data.json')
 };
 
-// ─── الرموز المخصصة ───
-const IC = {
-    dot: '▸',
-    line: '─',
-    corner: '╰',
-    bar: '│',
-    arrow: '➜',
-    star: '✦',
-    check: '✓',
-    cross: '✗',
-    clock: '◷',
-    mail: '✉',
-    lock: '⊘',
-    user: '◉',
-    chart: '◈',
-    gear: '⟐',
-    crown: '♛',
-    shield: '⊡',
-    pulse: '◆',
-    ring: '○',
-    filled: '●',
-    spark: '∗',
-    send: '⊳',
-    pin: '⊿',
-    wave: '〜',
-    log: '◎',
-    restart: '⟳'
-};
+// ═══════════════════════════════════════════════════════════════
+//  الكلاينت
+// ═══════════════════════════════════════════════════════════════
 
-// ─── إنشاء الكلاينت ───
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -80,35 +92,38 @@ const client = new Client({
     ]
 });
 
-// مخزن المؤقتات النشطة
-const activeSchedules = new Map();
+// مخزن المؤقتات النشطة للجدولة
+const activeTimers = new Map();
 
-// ═══════════════════════════════════════
-//  دوال التخزين
-// ═══════════════════════════════════════
+// مخزن مؤقت لبيانات الـ flow (بين الخطوات)
+const flowStore = new Map();
+
+// ═══════════════════════════════════════════════════════════════
+//  التخزين المحلي — data.json
+// ═══════════════════════════════════════════════════════════════
 
 function loadData() {
     try {
-        if (!fs.existsSync(DATA_FILE)) {
-            fs.writeFileSync(DATA_FILE, JSON.stringify({}, null, 2), 'utf-8');
+        if (!fs.existsSync(CONFIG.DATA_FILE)) {
+            fs.writeFileSync(CONFIG.DATA_FILE, JSON.stringify({}, null, 2), 'utf-8');
             return {};
         }
-        return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
-    } catch (err) {
-        console.error('[DATA] خطأ في القراءة:', err.message);
+        return JSON.parse(fs.readFileSync(CONFIG.DATA_FILE, 'utf-8'));
+    } catch (e) {
+        console.error('[DATA] فشل القراءة:', e.message);
         return {};
     }
 }
 
 function saveData(data) {
     try {
-        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf-8');
-    } catch (err) {
-        console.error('[DATA] خطأ في الحفظ:', err.message);
+        fs.writeFileSync(CONFIG.DATA_FILE, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (e) {
+        console.error('[DATA] فشل الحفظ:', e.message);
     }
 }
 
-function getGuildData(guildId) {
+function getGuild(guildId) {
     const data = loadData();
     if (!data[guildId]) {
         data[guildId] = {
@@ -125,98 +140,46 @@ function getGuildData(guildId) {
         };
         saveData(data);
     }
-    // ضمان وجود حقل logChannelId للبيانات القديمة
-    if (!data[guildId].hasOwnProperty('logChannelId')) {
+    // ضمان الحقول الجديدة للبيانات القديمة
+    if (!data[guildId].logChannelId && data[guildId].logChannelId !== null) {
         data[guildId].logChannelId = null;
         saveData(data);
     }
     return data[guildId];
 }
 
-function updateGuildData(guildId, guildData) {
+function saveGuild(guildId, guildData) {
     const data = loadData();
     data[guildId] = guildData;
     saveData(data);
 }
 
-// ═══════════════════════════════════════
-//  نظام اللوق — إرسال سجل للقناة المحددة
-// ═══════════════════════════════════════
-
-/**
- * إرسال لوق للقناة المحددة في السيرفر
- * لو ما في قناة لوق محددة، ما يسوي شي
- */
-async function sendLog(guildId, logEmbed) {
-    try {
-        const guildData = getGuildData(guildId);
-        if (!guildData.logChannelId) return; // ما في قناة لوق
-
-        const guild = client.guilds.cache.get(guildId);
-        if (!guild) return;
-
-        const logChannel = await guild.channels.fetch(guildData.logChannelId).catch(() => null);
-        if (!logChannel) return; // القناة ممكن تكون محذوفة
-
-        await logChannel.send({ embeds: [logEmbed] });
-    } catch (err) {
-        // تجاهل — ما نبي اللوق يوقف البوت
-    }
-}
-
-/**
- * بناء Embed لوق موحد
- */
-function buildLogEmbed(action, details, userId) {
-    return styledEmbed({
-        color: THEME.MAIN,
-        title: `${IC.log} سجل`,
-        description:
-            `${IC.dot} **${action}**\n\n` +
-            `${details}\n\n` +
-            `${IC.corner} <@${userId}> ${IC.dot} \`${formatDate(new Date())}\``
-    });
-}
-
-// ═══════════════════════════════════════
-//  دوال الصلاحيات
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  الصلاحيات
+// ═══════════════════════════════════════════════════════════════
 
 function isOwner(userId) {
-    return userId === OWNER_ID;
+    return userId === CONFIG.OWNER_ID;
 }
 
 function isAdmin(userId, guildId) {
     if (isOwner(userId)) return true;
-    const guildData = getGuildData(guildId);
-    return guildData.admins.includes(userId);
+    return getGuild(guildId).admins.includes(userId);
 }
 
-// ═══════════════════════════════════════
-//  دوال التصميم — هنا السحر
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  أدوات مساعدة
+// ═══════════════════════════════════════════════════════════════
 
-function divider() {
-    return `\`${IC.line.repeat(32)}\``;
-}
-
-function progressBar(percent) {
-    const total = 16;
-    const filled = Math.round((percent / 100) * total);
-    const empty = total - filled;
-    return `\`[\`${'▰'.repeat(filled)}${'▱'.repeat(empty)}\`]\` **${percent}%**`;
+function sleep(ms) {
+    return new Promise(r => setTimeout(r, ms));
 }
 
 function formatDate(date) {
-    const d = new Date(date);
-    return d.toLocaleString('en-US', {
+    return new Date(date).toLocaleString('en-US', {
         timeZone: 'Asia/Riyadh',
-        year: 'numeric',
-        month: 'short',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true
+        year: 'numeric', month: 'short', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: true
     });
 }
 
@@ -226,730 +189,213 @@ function formatUptime(ms) {
     const h = Math.floor(m / 60);
     const d = Math.floor(h / 24);
     const parts = [];
-    if (d > 0) parts.push(`${d}d`);
-    if (h % 24 > 0) parts.push(`${h % 24}h`);
-    if (m % 60 > 0) parts.push(`${m % 60}m`);
-    if (s % 60 > 0) parts.push(`${s % 60}s`);
+    if (d) parts.push(`${d}d`);
+    if (h % 24) parts.push(`${h % 24}h`);
+    if (m % 60) parts.push(`${m % 60}m`);
+    if (s % 60) parts.push(`${s % 60}s`);
     return parts.join(' ') || '0s';
 }
 
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+function progressBar(percent) {
+    const total = 16;
+    const filled = Math.round((percent / 100) * total);
+    return '▰'.repeat(filled) + '▱'.repeat(total - filled) + ` ${percent}%`;
 }
 
-function styledEmbed(options = {}) {
-    const embed = new EmbedBuilder()
-        .setColor(options.color || THEME.MAIN)
-        .setTimestamp();
-
-    if (options.title) {
-        embed.setAuthor({
-            name: options.title,
-            iconURL: options.icon || null
-        });
-    }
-
-    if (options.description) {
-        embed.setDescription(options.description);
-    }
-
-    if (options.fields) {
-        embed.addFields(options.fields);
-    }
-
-    if (options.footer) {
-        embed.setFooter({ text: options.footer });
-    }
-
-    if (options.thumbnail) {
-        embed.setThumbnail(options.thumbnail);
-    }
-
-    if (options.image) {
-        embed.setImage(options.image);
-    }
-
-    return embed;
+function uid() {
+    return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-async function collectMessage(channel, userId, promptText, timeout = COLLECTOR_TIMEOUT) {
-    const promptEmbed = styledEmbed({
-        color: THEME.FROST,
-        description: `${promptText}\n\n\`${IC.clock} ${Math.floor(timeout / 60000)} دقائق للإجابة  ${IC.dot} اكتب "إلغاء" للخروج\``,
-    });
+// ═══════════════════════════════════════════════════════════════
+//  بناء Components V2 — الدوال الأساسية
+// ═══════════════════════════════════════════════════════════════
 
-    await channel.send({ embeds: [promptEmbed] });
+/**
+ * بناء Container V2 كامل
+ * @param {number} color - لون الشريط الجانبي
+ * @param {Array} components - مصفوفة الـ components الداخلية
+ */
+function v2Container(color, ...components) {
+    const container = new ContainerBuilder().setAccentColor(color);
+    for (const comp of components) {
+        if (comp) container.addComponent(comp);
+    }
+    return container;
+}
+
+/**
+ * نص عادي
+ */
+function v2Text(content) {
+    return new TextDisplayBuilder().setContent(content);
+}
+
+/**
+ * فاصل
+ */
+function v2Separator(spacing = SeparatorSpacingSize.Small) {
+    return new SeparatorBuilder().setSpacing(spacing).setDivider(true);
+}
+
+/**
+ * Section — نص يسار + صورة مصغرة يمين
+ */
+function v2Section(textContent, thumbnailUrl) {
+    const section = new SectionBuilder();
+    section.addTextDisplayComponents(new TextDisplayBuilder().setContent(textContent));
+    if (thumbnailUrl) {
+        section.setThumbnail(new ThumbnailBuilder().setURL(thumbnailUrl));
+    }
+    return section;
+}
+
+/**
+ * Section — نص يسار + زر يمين
+ */
+function v2SectionButton(textContent, button) {
+    const section = new SectionBuilder();
+    section.addTextDisplayComponents(new TextDisplayBuilder().setContent(textContent));
+    section.setButtonAccessory(button);
+    return section;
+}
+
+/**
+ * معرض صور
+ */
+function v2Gallery(imageUrl) {
+    return new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder().setURL(imageUrl)
+    );
+}
+
+/**
+ * إرسال رسالة V2
+ */
+function v2Message(container, ephemeral = false) {
+    const msg = {
+        components: [container],
+        flags: MessageFlags.IsComponentsV2
+    };
+    if (ephemeral) {
+        msg.flags = MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral;
+    }
+    return msg;
+}
+
+/**
+ * بناء Container خطأ
+ */
+function v2Error(text) {
+    return v2Container(
+        CONFIG.THEME.DANGER,
+        v2Text(`### ✗ خطأ\n${text}`)
+    );
+}
+
+/**
+ * بناء Container نجاح
+ */
+function v2Success(text) {
+    return v2Container(
+        CONFIG.THEME.SUCCESS,
+        v2Text(`### ✓ تم\n${text}`)
+    );
+}
+
+/**
+ * بناء Container معلومة
+ */
+function v2Info(title, text) {
+    return v2Container(
+        CONFIG.THEME.INFO,
+        v2Text(`### ${title}\n${text}`)
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  نظام اللوق
+// ═══════════════════════════════════════════════════════════════
+
+async function sendLog(guildId, color, action, details, userId) {
+    try {
+        const gd = getGuild(guildId);
+        if (!gd.logChannelId) return;
+
+        const guild = client.guilds.cache.get(guildId);
+        if (!guild) return;
+
+        const ch = await guild.channels.fetch(gd.logChannelId).catch(() => null);
+        if (!ch) return;
+
+        const container = v2Container(
+            color,
+            v2Text(`### ◎ سجل`),
+            v2Separator(),
+            v2Text(`**${action}**\n\n${details}`),
+            v2Separator(),
+            v2Text(`-# <@${userId}> • ${formatDate(new Date())}`)
+        );
+
+        await ch.send(v2Message(container));
+    } catch (e) {
+        // اللوق ما يوقف البوت
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  جمع رسالة نصية من الشات
+// ═══════════════════════════════════════════════════════════════
+
+async function collectText(channel, userId, prompt, timeout = CONFIG.COLLECTOR_TIMEOUT) {
+    const container = v2Container(
+        CONFIG.THEME.INFO,
+        v2Text(prompt),
+        v2Separator(),
+        v2Text(`-# ◷ ${Math.floor(timeout / 60000)} دقائق • اكتب "إلغاء" للخروج`)
+    );
+
+    await channel.send(v2Message(container));
 
     try {
-        const filter = m => m.author.id === userId;
         const collected = await channel.awaitMessages({
-            filter, max: 1, time: timeout, errors: ['time']
+            filter: m => m.author.id === userId,
+            max: 1,
+            time: timeout,
+            errors: ['time']
         });
 
-        const response = collected.first();
-        if (['إلغاء', 'الغاء', 'cancel'].includes(response.content.trim().toLowerCase())) {
-            await channel.send({
-                embeds: [styledEmbed({
-                    color: THEME.WARM,
-                    description: `${IC.dot} تم إلغاء العملية`
-                })]
-            });
+        const resp = collected.first();
+        if (['إلغاء', 'الغاء', 'cancel'].includes(resp.content.trim().toLowerCase())) {
+            await channel.send(v2Message(v2Container(CONFIG.THEME.WARNING, v2Text('▸ تم إلغاء العملية'))));
             return null;
         }
-        return response;
+        return resp;
     } catch {
-        await channel.send({
-            embeds: [styledEmbed({
-                color: THEME.ROSE,
-                description: `${IC.cross} انتهى الوقت المخصص — حاول مرة ثانية`
-            })]
-        });
+        await channel.send(v2Message(v2Container(CONFIG.THEME.DANGER, v2Text('✗ انتهى الوقت — حاول مرة ثانية'))));
         return null;
     }
 }
 
-// ═══════════════════════════════════════
-//  نظام البرودكاست
-// ═══════════════════════════════════════
-
-async function sendBroadcast(guild, channel, broadcastContent, maxMembers = 0) {
-    await guild.members.fetch();
-
-    let members = guild.members.cache.filter(m => !m.user.bot).map(m => m);
-
-    if (maxMembers > 0 && maxMembers < members.length) {
-        members = members.sort(() => Math.random() - 0.5).slice(0, maxMembers);
-    }
-
-    const total = members.length;
-    let delivered = 0;
-    let failed = 0;
-    let blocked = 0;
-
-    const progressMsg = await channel.send({
-        embeds: [styledEmbed({
-            color: THEME.ACCENT,
-            title: `${IC.send} جاري الإرسال`,
-            description:
-                `${divider()}\n` +
-                `${IC.dot} الأعضاء: **${total}**\n` +
-                `${IC.dot} الحالة: **بدأ الإرسال...**\n` +
-                `${divider()}\n` +
-                `${progressBar(0)}`
-        })]
-    });
-
-    let updateCounter = 0;
-
-    for (let i = 0; i < members.length; i++) {
-        const member = members[i];
-
-        try {
-            const payload = {};
-
-            if (broadcastContent.text) {
-                payload.content = broadcastContent.text;
-            }
-
-            if (broadcastContent.embed) {
-                payload.embeds = [EmbedBuilder.from(broadcastContent.embed)];
-            }
-
-            if (broadcastContent.image && !broadcastContent.embed) {
-                payload.files = [broadcastContent.image];
-            }
-
-            await member.send(payload);
-            delivered++;
-        } catch (error) {
-            if (error.code === 50007) {
-                blocked++;
-            } else {
-                failed++;
-            }
-        }
-
-        updateCounter++;
-
-        if (updateCounter >= 8 || i === members.length - 1) {
-            updateCounter = 0;
-            const percent = Math.round(((i + 1) / total) * 100);
-
-            try {
-                await progressMsg.edit({
-                    embeds: [styledEmbed({
-                        color: THEME.ACCENT,
-                        title: `${IC.send} جاري الإرسال`,
-                        description:
-                            `${divider()}\n` +
-                            `${IC.check} وصل: **${delivered}**\n` +
-                            `${IC.cross} فشل: **${failed}**\n` +
-                            `${IC.lock} مقفل: **${blocked}**\n` +
-                            `${IC.clock} متبقي: **${total - (i + 1)}**\n` +
-                            `${divider()}\n` +
-                            `${progressBar(percent)}`
-                    })]
-                });
-            } catch (e) { }
-        }
-
-        if (i < members.length - 1) {
-            await sleep(DM_DELAY);
-        }
-    }
-
-    const successRate = total > 0 ? Math.round((delivered / total) * 100) : 0;
-
-    const finalEmbed = styledEmbed({
-        color: delivered > 0 ? THEME.GLOW : THEME.ROSE,
-        title: `${IC.chart} التقرير النهائي`,
-        description:
-            `${maxMembers > 0 ? `\`  تجربة  \`\n\n` : ''}` +
-            `${divider()}\n\n` +
-
-            `${IC.user}  الأعضاء المستهدفين\n` +
-            `\`\`\`${total}\`\`\`\n` +
-
-            `${IC.check}  وصلت بنجاح\n` +
-            `\`\`\`${delivered}\`\`\`\n` +
-
-            `${IC.cross}  فشل الإرسال\n` +
-            `\`\`\`${failed}\`\`\`\n` +
-
-            `${IC.lock}  الخاص مقفل\n` +
-            `\`\`\`${blocked}\`\`\`\n` +
-
-            `${divider()}\n\n` +
-            `${IC.chart} نسبة الوصول: ${progressBar(successRate)}`,
-
-        footer: `${guild.name} ${IC.dot} ${formatDate(new Date())}`
-    });
-
-    try {
-        await progressMsg.edit({ embeds: [finalEmbed] });
-    } catch {
-        await channel.send({ embeds: [finalEmbed] });
-    }
-
-    // تحديث الإحصائيات
-    const guildData = getGuildData(guild.id);
-    guildData.stats.totalBroadcasts++;
-    guildData.stats.totalDelivered += delivered;
-    guildData.stats.totalFailed += failed;
-    guildData.stats.totalBlocked += blocked;
-
-    const storableContent = { ...broadcastContent };
-    guildData.lastBroadcast = {
-        content: storableContent,
-        timestamp: new Date().toISOString(),
-        stats: { delivered, failed, blocked, total }
-    };
-    updateGuildData(guild.id, guildData);
-
-    // إرسال لوق للقناة المحددة
-    await sendLog(guild.id, buildLogEmbed(
-        `${maxMembers > 0 ? 'برودكاست تجريبي' : 'برودكاست'} تم إرساله`,
-        `${IC.user} المستهدفين: **${total}**\n` +
-        `${IC.check} وصل: **${delivered}**\n` +
-        `${IC.cross} فشل: **${failed}**\n` +
-        `${IC.lock} مقفل: **${blocked}**\n` +
-        `${IC.chart} النسبة: **${successRate}%**`,
-        'system'
-    ));
-
-    return { delivered, failed, blocked, total };
-}
-
-// ═══════════════════════════════════════
-//  Flow بناء البرودكاست التفاعلي
-// ═══════════════════════════════════════
-
-async function startBroadcastFlow(message, isTest = false) {
-    const userId = message.author.id;
-    const channel = message.channel;
-    const guildId = message.guild.id;
-
-    // ── المرحلة 1: نوع المحتوى ──
-    const typeMenu = new StringSelectMenuBuilder()
-        .setCustomId(`bc_type_${userId}_${Date.now()}`)
-        .setPlaceholder('اختر نوع المحتوى...')
-        .addOptions([
-            {
-                label: 'نص فقط',
-                description: 'رسالة نصية بدون مرفقات',
-                value: 'text_only',
-                emoji: '📄'
-            },
-            {
-                label: 'صورة فقط',
-                description: 'صورة بدون نص',
-                value: 'image_only',
-                emoji: '🎨'
-            },
-            {
-                label: 'نص مع صورة',
-                description: 'رسالة نصية مرفقة بصورة',
-                value: 'text_and_image',
-                emoji: '📎'
-            }
-        ]);
-
-    const typeMsg = await channel.send({
-        embeds: [styledEmbed({
-            color: THEME.ACCENT,
-            title: isTest ? `${IC.spark} برودكاست تجريبي` : `${IC.send} برودكاست جديد`,
-            description:
-                `مرحباً <@${userId}>\n\n` +
-                `${IC.dot} وش نوع الرسالة اللي تبي ترسلها؟\n` +
-                `${IC.dot} اختر من القائمة تحت`,
-            footer: `الخطوة 1 من 4`
-        })],
-        components: [new ActionRowBuilder().addComponents(typeMenu)]
-    });
-
-    let contentType;
-    try {
-        const typeInt = await typeMsg.awaitMessageComponent({
-            filter: i => i.user.id === userId,
-            componentType: ComponentType.StringSelect,
-            time: COLLECTOR_TIMEOUT
-        });
-
-        contentType = typeInt.values[0];
-        const typeLabel = contentType === 'text_only' ? 'نص فقط' :
-            contentType === 'image_only' ? 'صورة فقط' : 'نص + صورة';
-
-        await typeInt.update({
-            embeds: [styledEmbed({
-                color: THEME.MAIN,
-                description: `${IC.check} تم اختيار: **${typeLabel}**`
-            })],
-            components: []
-        });
-    } catch {
-        return await typeMsg.edit({
-            embeds: [styledEmbed({ color: THEME.ROSE, description: `${IC.cross} انتهى الوقت` })],
-            components: []
-        });
-    }
-
-    // ── المرحلة 2: Embed أو عادي ──
-    const embedMenu = new StringSelectMenuBuilder()
-        .setCustomId(`bc_embed_${userId}_${Date.now()}`)
-        .setPlaceholder('اختر شكل الرسالة...')
-        .addOptions([
-            {
-                label: 'Embed منسق',
-                description: 'رسالة مُنسّقة بإطار وألوان',
-                value: 'yes',
-                emoji: '✨'
-            },
-            {
-                label: 'رسالة عادية',
-                description: 'نص عادي بدون تنسيق',
-                value: 'no',
-                emoji: '💬'
-            }
-        ]);
-
-    const embedMsg = await channel.send({
-        embeds: [styledEmbed({
-            color: THEME.ACCENT,
-            title: `${IC.gear} شكل الرسالة`,
-            description:
-                `${IC.dot} تبي الرسالة تكون Embed منسق؟\n` +
-                `${IC.dot} ولا رسالة عادية؟`,
-            footer: 'الخطوة 2 من 4'
-        })],
-        components: [new ActionRowBuilder().addComponents(embedMenu)]
-    });
-
-    let useEmbed;
-    try {
-        const embedInt = await embedMsg.awaitMessageComponent({
-            filter: i => i.user.id === userId,
-            componentType: ComponentType.StringSelect,
-            time: COLLECTOR_TIMEOUT
-        });
-
-        useEmbed = embedInt.values[0] === 'yes';
-
-        await embedInt.update({
-            embeds: [styledEmbed({
-                color: THEME.MAIN,
-                description: `${IC.check} تم اختيار: **${useEmbed ? 'Embed منسق' : 'رسالة عادية'}**`
-            })],
-            components: []
-        });
-    } catch {
-        return await embedMsg.edit({
-            embeds: [styledEmbed({ color: THEME.ROSE, description: `${IC.cross} انتهى الوقت` })],
-            components: []
-        });
-    }
-
-    // ── المرحلة 3: جمع المحتوى ──
-    let broadcastContent = {
-        text: null,
-        image: null,
-        embed: null,
-        type: contentType,
-        isEmbed: useEmbed
-    };
-
-    if (contentType === 'text_only' || contentType === 'text_and_image') {
-        if (useEmbed) {
-            const titleResp = await collectMessage(channel, userId,
-                `${IC.dot} اكتب **عنوان** الرسالة:`
-            );
-            if (!titleResp) return;
-
-            const descResp = await collectMessage(channel, userId,
-                `${IC.dot} اكتب **محتوى** الرسالة:`
-            );
-            if (!descResp) return;
-
-            const bEmbed = new EmbedBuilder()
-                .setColor(THEME.ACCENT)
-                .setTitle(titleResp.content)
-                .setDescription(descResp.content)
-                .setTimestamp();
-
-            if (contentType === 'text_and_image') {
-                const imgResp = await collectMessage(channel, userId,
-                    `${IC.dot} أرسل **الصورة** — رابط أو ارفق ملف:`
-                );
-                if (!imgResp) return;
-
-                const imgUrl = extractImage(imgResp);
-                if (imgUrl) {
-                    bEmbed.setImage(imgUrl);
-                    broadcastContent.image = imgUrl;
-                }
-            }
-
-            broadcastContent.embed = bEmbed.toJSON();
-
-        } else {
-            const textResp = await collectMessage(channel, userId,
-                `${IC.dot} اكتب **نص الرسالة**:`
-            );
-            if (!textResp) return;
-            broadcastContent.text = textResp.content;
-
-            if (contentType === 'text_and_image') {
-                const imgResp = await collectMessage(channel, userId,
-                    `${IC.dot} أرسل **الصورة** — رابط أو ارفق ملف:`
-                );
-                if (!imgResp) return;
-
-                const imgUrl = extractImage(imgResp);
-                if (imgUrl) broadcastContent.image = imgUrl;
-            }
-        }
-    } else if (contentType === 'image_only') {
-        if (useEmbed) {
-            const titleResp = await collectMessage(channel, userId,
-                `${IC.dot} اكتب **عنوان** الـ Embed — أو اكتب "تخطي":`
-            );
-            if (!titleResp) return;
-
-            const imgResp = await collectMessage(channel, userId,
-                `${IC.dot} أرسل **الصورة** — رابط أو ارفق ملف:`
-            );
-            if (!imgResp) return;
-
-            const imgUrl = extractImage(imgResp);
-            const bEmbed = new EmbedBuilder()
-                .setColor(THEME.ACCENT)
-                .setTimestamp();
-
-            if (titleResp.content.toLowerCase() !== 'تخطي') {
-                bEmbed.setTitle(titleResp.content);
-            }
-
-            if (imgUrl) {
-                bEmbed.setImage(imgUrl);
-                broadcastContent.image = imgUrl;
-            }
-
-            broadcastContent.embed = bEmbed.toJSON();
-        } else {
-            const imgResp = await collectMessage(channel, userId,
-                `${IC.dot} أرسل **الصورة** — رابط أو ارفق ملف:`
-            );
-            if (!imgResp) return;
-
-            const imgUrl = extractImage(imgResp);
-            if (imgUrl) broadcastContent.image = imgUrl;
-        }
-    }
-
-    // ── المرحلة 4: التوقيت ──
-    const schedMenu = new StringSelectMenuBuilder()
-        .setCustomId(`bc_sched_${userId}_${Date.now()}`)
-        .setPlaceholder('متى ترسل؟')
-        .addOptions([
-            {
-                label: 'أرسل الحين',
-                description: 'إرسال فوري للجميع',
-                value: 'now',
-                emoji: '⚡'
-            },
-            {
-                label: 'جدول لوقت ثاني',
-                description: 'حدد تاريخ ووقت مستقبلي',
-                value: 'later',
-                emoji: '🗓️'
-            }
-        ]);
-
-    const schedMsg = await channel.send({
-        embeds: [styledEmbed({
-            color: THEME.SOFT,
-            title: `${IC.clock} وقت الإرسال`,
-            description:
-                `${IC.dot} تبي ترسل الحين ولا تجدولها؟`,
-            footer: 'الخطوة 3 من 4'
-        })],
-        components: [new ActionRowBuilder().addComponents(schedMenu)]
-    });
-
-    let sendNow;
-    let scheduledTime = null;
-
-    try {
-        const schedInt = await schedMsg.awaitMessageComponent({
-            filter: i => i.user.id === userId,
-            componentType: ComponentType.StringSelect,
-            time: COLLECTOR_TIMEOUT
-        });
-
-        sendNow = schedInt.values[0] === 'now';
-
-        await schedInt.update({
-            embeds: [styledEmbed({
-                color: THEME.MAIN,
-                description: `${IC.check} ${sendNow ? 'إرسال فوري' : 'جدولة'}`
-            })],
-            components: []
-        });
-    } catch {
-        return await schedMsg.edit({
-            embeds: [styledEmbed({ color: THEME.ROSE, description: `${IC.cross} انتهى الوقت` })],
-            components: []
-        });
-    }
-
-    if (!sendNow) {
-        const timeResp = await collectMessage(channel, userId,
-            `${IC.clock} اكتب الوقت بتوقيت الرياض:\n\n` +
-            `\`\`\`\nالصيغة: YYYY-MM-DD HH:MM\nمثال:  2025-06-20 15:30\n\`\`\``
-        );
-        if (!timeResp) return;
-
-        const match = timeResp.content.trim().match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
-        if (!match) {
-            return channel.send({
-                embeds: [styledEmbed({
-                    color: THEME.ROSE,
-                    description: `${IC.cross} صيغة الوقت غلط — استخدم: \`YYYY-MM-DD HH:MM\``
-                })]
-            });
-        }
-
-        const [, yr, mo, dy, hr, mn] = match;
-        const riyadhDate = new Date(`${yr}-${mo}-${dy}T${hr}:${mn}:00+03:00`);
-
-        if (riyadhDate <= new Date()) {
-            return channel.send({
-                embeds: [styledEmbed({
-                    color: THEME.ROSE,
-                    description: `${IC.cross} الوقت هذا في الماضي — اختر وقت مستقبلي`
-                })]
-            });
-        }
-
-        scheduledTime = riyadhDate.toISOString();
-        broadcastContent.scheduledTime = scheduledTime;
-    }
-
-    let testCount = 0;
-    if (isTest) {
-        const countResp = await collectMessage(channel, userId,
-            `${IC.spark} كم عضو تبي ترسل لهم كتجربة؟`
-        );
-        if (!countResp) return;
-
-        testCount = parseInt(countResp.content);
-        if (isNaN(testCount) || testCount < 1) {
-            return channel.send({
-                embeds: [styledEmbed({
-                    color: THEME.ROSE,
-                    description: `${IC.cross} اكتب رقم صحيح أكبر من 0`
-                })]
-            });
-        }
-    }
-
-    // ── المرحلة 5: المعاينة والتأكيد ──
-    await channel.send({
-        embeds: [styledEmbed({
-            color: THEME.WARM,
-            title: `${IC.star} معاينة الرسالة`,
-            description: `هكذا بتوصل الرسالة للأعضاء:`,
-            footer: 'الخطوة 4 من 4 — تأكد من كل شي'
-        })]
-    });
-
-    const preview = buildMessagePayload(broadcastContent);
-    await channel.send(preview);
-
-    let infoLines = [];
-    if (scheduledTime) infoLines.push(`${IC.clock}  الموعد: **${formatDate(scheduledTime)}**`);
-    if (isTest) infoLines.push(`${IC.spark}  عدد التجربة: **${testCount}** عضو`);
-
-    const ts = Date.now();
-    const confirmRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId(`bc_yes_${ts}`)
-            .setLabel(sendNow ? 'أرسل الحين' : 'أكد الجدولة')
-            .setStyle(ButtonStyle.Success),
-        new ButtonBuilder()
-            .setCustomId(`bc_redo_${ts}`)
-            .setLabel('من البداية')
-            .setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder()
-            .setCustomId(`bc_no_${ts}`)
-            .setLabel('إلغاء')
-            .setStyle(ButtonStyle.Danger)
-    );
-
-    const confirmMsg = await channel.send({
-        embeds: [styledEmbed({
-            color: THEME.WARM,
-            description:
-                `${IC.dot} تأكيد ${sendNow ? 'الإرسال' : 'الجدولة'}؟\n\n` +
-                (infoLines.length > 0 ? infoLines.join('\n') + '\n\n' : '') +
-                `\`اضغط الزر المناسب\``
-        })],
-        components: [confirmRow]
-    });
-
-    try {
-        const btnInt = await confirmMsg.awaitMessageComponent({
-            filter: i => i.user.id === userId,
-            componentType: ComponentType.Button,
-            time: COLLECTOR_TIMEOUT
-        });
-
-        if (btnInt.customId === `bc_yes_${ts}`) {
-            await btnInt.update({
-                embeds: [styledEmbed({
-                    color: THEME.GLOW,
-                    description: sendNow
-                        ? `${IC.send} جاري الإرسال...`
-                        : `${IC.clock} جاري الجدولة...`
-                })],
-                components: []
-            });
-
-            if (sendNow) {
-                // لوق بدء الإرسال
-                await sendLog(guildId, buildLogEmbed(
-                    'بدأ إرسال برودكاست',
-                    `${IC.dot} النوع: **${contentType}**\n${IC.dot} تجربة: **${isTest ? 'نعم — ' + testCount + ' عضو' : 'لا'}**`,
-                    userId
-                ));
-
-                await sendBroadcast(message.guild, channel, broadcastContent, isTest ? testCount : 0);
-            } else {
-                const scheduleId = `s_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-                const guildData = getGuildData(guildId);
-
-                const entry = {
-                    id: scheduleId,
-                    content: broadcastContent,
-                    scheduledTime: scheduledTime,
-                    channelId: channel.id,
-                    createdBy: userId,
-                    createdAt: new Date().toISOString(),
-                    isTest,
-                    testCount
-                };
-
-                guildData.scheduledMessages.push(entry);
-                updateGuildData(guildId, guildData);
-                scheduleMessageTimer(message.guild, entry);
-
-                await channel.send({
-                    embeds: [styledEmbed({
-                        color: THEME.SOFT,
-                        title: `${IC.check} تم جدولة البرودكاست`,
-                        description:
-                            `${divider()}\n\n` +
-                            `${IC.pin}  المعرف: \`${scheduleId}\`\n` +
-                            `${IC.clock}  الموعد: **${formatDate(scheduledTime)}**\n` +
-                            `${IC.user}  بواسطة: <@${userId}>\n\n` +
-                            `${divider()}\n\n` +
-                            `\`يمكنك إلغاءها من ${PREFIX}scheduled\``,
-                        footer: `${message.guild.name}`
-                    })]
-                });
-
-                // لوق الجدولة
-                await sendLog(guildId, buildLogEmbed(
-                    'تم جدولة برودكاست',
-                    `${IC.pin} المعرف: \`${scheduleId}\`\n${IC.clock} الموعد: **${formatDate(scheduledTime)}**`,
-                    userId
-                ));
-            }
-
-        } else if (btnInt.customId === `bc_redo_${ts}`) {
-            await btnInt.update({
-                embeds: [styledEmbed({
-                    color: THEME.FROST,
-                    description: `${IC.dot} تم الإلغاء — استخدم الأمر مرة ثانية`
-                })],
-                components: []
-            });
-        } else {
-            await btnInt.update({
-                embeds: [styledEmbed({
-                    color: THEME.ROSE,
-                    description: `${IC.cross} تم إلغاء البرودكاست`
-                })],
-                components: []
-            });
-        }
-
-    } catch {
-        await confirmMsg.edit({
-            embeds: [styledEmbed({ color: THEME.ROSE, description: `${IC.cross} انتهى الوقت` })],
-            components: []
-        });
-    }
-}
+// ═══════════════════════════════════════════════════════════════
+//  استخراج صورة من رسالة
+// ═══════════════════════════════════════════════════════════════
 
 function extractImage(msg) {
-    if (msg.attachments.size > 0) {
-        return msg.attachments.first().url;
-    }
-    const urlMatch = msg.content.match(/https?:\/\/\S+\.(png|jpg|jpeg|gif|webp)(\?\S*)?/i);
-    if (urlMatch) return urlMatch[0];
-
-    const generalUrl = msg.content.match(/https?:\/\/\S+/);
-    if (generalUrl) return generalUrl[0];
-
-    return null;
+    if (msg.attachments.size > 0) return msg.attachments.first().url;
+    const match = msg.content.match(/https?:\/\/\S+\.(png|jpg|jpeg|gif|webp)(\?\S*)?/i);
+    if (match) return match[0];
+    const general = msg.content.match(/https?:\/\/\S+/);
+    return general ? general[0] : null;
 }
 
-function buildMessagePayload(content) {
+// ═══════════════════════════════════════════════════════════════
+//  بناء Payload الرسالة (للـ DM — embed عادي)
+// ═══════════════════════════════════════════════════════════════
+
+function buildDmPayload(content) {
     const payload = {};
 
-    if (content.text) {
-        payload.content = content.text;
-    }
+    if (content.text) payload.content = content.text;
 
     if (content.embed) {
         payload.embeds = [EmbedBuilder.from(content.embed)];
@@ -966,64 +412,688 @@ function buildMessagePayload(content) {
     return payload;
 }
 
-// ═══════════════════════════════════════
-//  نظام الجدولة
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  إرسال البرودكاست
+// ═══════════════════════════════════════════════════════════════
 
-function scheduleMessageTimer(guild, entry) {
+async function executeBroadcast(guild, channel, broadcastContent, maxMembers = 0) {
+    // جلب كل الأعضاء
+    await guild.members.fetch();
+    let members = guild.members.cache.filter(m => !m.user.bot).map(m => m);
+
+    // لو تجربة — نختار عشوائي
+    if (maxMembers > 0 && maxMembers < members.length) {
+        members = members.sort(() => Math.random() - 0.5).slice(0, maxMembers);
+    }
+
+    const total = members.length;
+    let delivered = 0, failed = 0, blocked = 0;
+
+    // رسالة التقدم
+    const progressContainer = v2Container(
+        CONFIG.THEME.PRIMARY,
+        v2Text(`### ⊳ جاري الإرسال`),
+        v2Separator(),
+        v2Text(`▸ الأعضاء: **${total}**\n▸ الحالة: **بدأ...**\n\n\`${progressBar(0)}\``)
+    );
+
+    const progressMsg = await channel.send(v2Message(progressContainer));
+
+    let counter = 0;
+
+    for (let i = 0; i < members.length; i++) {
+        const member = members[i];
+
+        try {
+            const payload = buildDmPayload(broadcastContent);
+            await member.send(payload);
+            delivered++;
+        } catch (err) {
+            if (err.code === 50007) blocked++;
+            else failed++;
+        }
+
+        counter++;
+
+        // تحديث كل 8 أعضاء أو عند النهاية
+        if (counter >= 8 || i === members.length - 1) {
+            counter = 0;
+            const pct = Math.round(((i + 1) / total) * 100);
+
+            try {
+                const updateContainer = v2Container(
+                    CONFIG.THEME.PRIMARY,
+                    v2Text(`### ⊳ جاري الإرسال`),
+                    v2Separator(),
+                    v2Text(
+                        `✓ وصل: **${delivered}**\n` +
+                        `✗ فشل: **${failed}**\n` +
+                        `⊘ مقفل: **${blocked}**\n` +
+                        `◷ متبقي: **${total - (i + 1)}**\n\n` +
+                        `\`${progressBar(pct)}\``
+                    )
+                );
+                await progressMsg.edit(v2Message(updateContainer));
+            } catch (e) { }
+        }
+
+        if (i < members.length - 1) await sleep(CONFIG.DM_DELAY);
+    }
+
+    // التقرير النهائي
+    const rate = total > 0 ? Math.round((delivered / total) * 100) : 0;
+
+    const reportContainer = v2Container(
+        delivered > 0 ? CONFIG.THEME.SUCCESS : CONFIG.THEME.DANGER,
+        v2Text(`### ◈ التقرير النهائي`),
+        v2Separator(),
+        v2Text(
+            (maxMembers > 0 ? '`  تجربة  `\n\n' : '') +
+            `◉ المستهدفين: **${total}**\n` +
+            `✓ وصل بنجاح: **${delivered}**\n` +
+            `✗ فشل: **${failed}**\n` +
+            `⊘ مقفل الخاص: **${blocked}**\n\n` +
+            `\`${progressBar(rate)}\``
+        ),
+        v2Separator(),
+        v2Text(`-# ${guild.name} • ${formatDate(new Date())}`)
+    );
+
+    try {
+        await progressMsg.edit(v2Message(reportContainer));
+    } catch {
+        await channel.send(v2Message(reportContainer));
+    }
+
+    // تحديث الإحصائيات
+    const gd = getGuild(guild.id);
+    gd.stats.totalBroadcasts++;
+    gd.stats.totalDelivered += delivered;
+    gd.stats.totalFailed += failed;
+    gd.stats.totalBlocked += blocked;
+
+    gd.lastBroadcast = {
+        content: { ...broadcastContent },
+        timestamp: new Date().toISOString(),
+        stats: { delivered, failed, blocked, total }
+    };
+    saveGuild(guild.id, gd);
+
+    // لوق
+    await sendLog(guild.id, CONFIG.THEME.LOG_SUCCESS,
+        maxMembers > 0 ? 'برودكاست تجريبي' : 'برودكاست تم إرساله',
+        `◉ المستهدفين: **${total}**\n✓ وصل: **${delivered}**\n✗ فشل: **${failed}**\n⊘ مقفل: **${blocked}**\n◈ النسبة: **${rate}%**`,
+        'system'
+    );
+
+    return { delivered, failed, blocked, total };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Flow البرودكاست التفاعلي الكامل
+// ═══════════════════════════════════════════════════════════════
+
+async function broadcastFlow(message, isTest = false) {
+    const userId = message.author.id;
+    const channel = message.channel;
+    const guildId = message.guild.id;
+    const ts = uid();
+
+    // ═══ الخطوة 1: نوع المحتوى ═══
+    const typeMenu = new StringSelectMenuBuilder()
+        .setCustomId(`bc_type_${ts}`)
+        .setPlaceholder('اختر نوع المحتوى...')
+        .addOptions([
+            { label: 'نص فقط', description: 'رسالة نصية بدون مرفقات', value: 'text_only', emoji: '📄' },
+            { label: 'صورة فقط', description: 'صورة بدون نص', value: 'image_only', emoji: '🖼️' },
+            { label: 'نص + صورة', description: 'رسالة نصية مع صورة', value: 'text_and_image', emoji: '📎' }
+        ]);
+
+    const step1Container = v2Container(
+        CONFIG.THEME.PRIMARY,
+        v2Text(`### ${isTest ? '∗ برودكاست تجريبي' : '⊳ برودكاست جديد'}`),
+        v2Separator(),
+        v2Text(`مرحباً <@${userId}>\n\n▸ وش نوع الرسالة اللي تبي ترسلها؟`),
+        v2Separator(),
+        v2Text(`-# الخطوة 1 من 5`),
+        new ActionRowBuilder().addComponents(typeMenu)
+    );
+
+    const step1Msg = await channel.send(v2Message(step1Container));
+
+    let contentType;
+    try {
+        const typeInt = await step1Msg.awaitMessageComponent({
+            filter: i => i.user.id === userId && i.customId === `bc_type_${ts}`,
+            componentType: ComponentType.StringSelect,
+            time: CONFIG.COLLECTOR_TIMEOUT
+        });
+
+        contentType = typeInt.values[0];
+        const label = contentType === 'text_only' ? 'نص فقط' : contentType === 'image_only' ? 'صورة فقط' : 'نص + صورة';
+
+        await typeInt.update(v2Message(v2Container(CONFIG.THEME.MUTED, v2Text(`✓ النوع: **${label}**`))));
+    } catch {
+        return step1Msg.edit(v2Message(v2Error('انتهى الوقت'))).catch(() => { });
+    }
+
+    // ═══ الخطوة 2: شكل الرسالة ═══
+    const ts2 = uid();
+    const styleMenu = new StringSelectMenuBuilder()
+        .setCustomId(`bc_style_${ts2}`)
+        .setPlaceholder('اختر شكل الرسالة...')
+        .addOptions([
+            { label: 'Embed منسق', description: 'رسالة بإطار وألوان', value: 'embed', emoji: '✨' },
+            { label: 'رسالة عادية', description: 'نص بدون تنسيق', value: 'plain', emoji: '💬' }
+        ]);
+
+    const step2Container = v2Container(
+        CONFIG.THEME.PRIMARY,
+        v2Text(`### ⟐ شكل الرسالة`),
+        v2Separator(),
+        v2Text(`▸ تبي الرسالة تكون Embed ولا عادية؟`),
+        v2Separator(),
+        v2Text(`-# الخطوة 2 من 5`),
+        new ActionRowBuilder().addComponents(styleMenu)
+    );
+
+    const step2Msg = await channel.send(v2Message(step2Container));
+
+    let useEmbed;
+    try {
+        const styleInt = await step2Msg.awaitMessageComponent({
+            filter: i => i.user.id === userId && i.customId === `bc_style_${ts2}`,
+            componentType: ComponentType.StringSelect,
+            time: CONFIG.COLLECTOR_TIMEOUT
+        });
+
+        useEmbed = styleInt.values[0] === 'embed';
+
+        await styleInt.update(v2Message(v2Container(CONFIG.THEME.MUTED, v2Text(`✓ الشكل: **${useEmbed ? 'Embed' : 'عادي'}**`))));
+    } catch {
+        return step2Msg.edit(v2Message(v2Error('انتهى الوقت'))).catch(() => { });
+    }
+
+    // ═══ الخطوة 3: جمع المحتوى ═══
+    let broadcastContent = { text: null, image: null, embed: null, type: contentType, isEmbed: useEmbed };
+
+    if (contentType === 'text_only' || contentType === 'text_and_image') {
+        if (useEmbed) {
+            // Modal لإدخال بيانات الـ Embed
+            const ts3 = uid();
+
+            // نحتاج interaction عشان نفتح Modal — نستخدم زر مؤقت
+            const modalTriggerBtn = new ButtonBuilder()
+                .setCustomId(`bc_modal_trigger_${ts3}`)
+                .setLabel('✏️ اكتب المحتوى')
+                .setStyle(ButtonStyle.Primary);
+
+            const triggerContainer = v2Container(
+                CONFIG.THEME.PRIMARY,
+                v2Text(`### ✏️ محتوى الرسالة`),
+                v2Separator(),
+                v2Text(`▸ اضغط الزر عشان تكتب العنوان والمحتوى`),
+                v2Separator(),
+                v2Text(`-# الخطوة 3 من 5`),
+                new ActionRowBuilder().addComponents(modalTriggerBtn)
+            );
+
+            const triggerMsg = await channel.send(v2Message(triggerContainer));
+
+            try {
+                const btnInt = await triggerMsg.awaitMessageComponent({
+                    filter: i => i.user.id === userId && i.customId === `bc_modal_trigger_${ts3}`,
+                    componentType: ComponentType.Button,
+                    time: CONFIG.COLLECTOR_TIMEOUT
+                });
+
+                // فتح Modal
+                const modal = new ModalBuilder()
+                    .setCustomId(`bc_embed_modal_${ts3}`)
+                    .setTitle('محتوى البرودكاست');
+
+                const titleInput = new TextInputBuilder()
+                    .setCustomId('embed_title')
+                    .setLabel('العنوان')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setMaxLength(256);
+
+                const descInput = new TextInputBuilder()
+                    .setCustomId('embed_desc')
+                    .setLabel('المحتوى')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setRequired(true)
+                    .setMaxLength(4000);
+
+                modal.addComponents(
+                    new ActionRowBuilder().addComponents(titleInput),
+                    new ActionRowBuilder().addComponents(descInput)
+                );
+
+                await btnInt.showModal(modal);
+
+                // انتظار الـ Modal
+                const modalInt = await btnInt.awaitModalSubmit({
+                    filter: i => i.customId === `bc_embed_modal_${ts3}`,
+                    time: CONFIG.COLLECTOR_TIMEOUT
+                });
+
+                const embedTitle = modalInt.fields.getTextInputValue('embed_title');
+                const embedDesc = modalInt.fields.getTextInputValue('embed_desc');
+
+                const bEmbed = new EmbedBuilder()
+                    .setColor(CONFIG.THEME.PRIMARY)
+                    .setTitle(embedTitle)
+                    .setDescription(embedDesc)
+                    .setTimestamp();
+
+                broadcastContent.embed = bEmbed.toJSON();
+
+                await modalInt.update(v2Message(v2Container(CONFIG.THEME.MUTED, v2Text(`✓ تم حفظ المحتوى`))));
+
+                // لو فيه صورة
+                if (contentType === 'text_and_image') {
+                    const imgResp = await collectText(channel, userId, '▸ أرسل **الصورة** — رابط أو ارفق ملف:');
+                    if (!imgResp) return;
+
+                    const imgUrl = extractImage(imgResp);
+                    if (imgUrl) {
+                        // نعدل الـ embed ونضيف الصورة
+                        const updatedEmbed = EmbedBuilder.from(broadcastContent.embed).setImage(imgUrl);
+                        broadcastContent.embed = updatedEmbed.toJSON();
+                        broadcastContent.image = imgUrl;
+                    }
+                }
+
+            } catch (err) {
+                return triggerMsg.edit(v2Message(v2Error('انتهى الوقت أو حدث خطأ'))).catch(() => { });
+            }
+
+        } else {
+            // رسالة عادية — يكتب في الشات
+            const textResp = await collectText(channel, userId, '▸ اكتب **نص الرسالة**:');
+            if (!textResp) return;
+            broadcastContent.text = textResp.content;
+
+            if (contentType === 'text_and_image') {
+                const imgResp = await collectText(channel, userId, '▸ أرسل **الصورة** — رابط أو ارفق ملف:');
+                if (!imgResp) return;
+                const imgUrl = extractImage(imgResp);
+                if (imgUrl) broadcastContent.image = imgUrl;
+            }
+        }
+
+    } else if (contentType === 'image_only') {
+        if (useEmbed) {
+            const ts3i = uid();
+            const modalTriggerBtn = new ButtonBuilder()
+                .setCustomId(`bc_img_modal_trigger_${ts3i}`)
+                .setLabel('✏️ عنوان الـ Embed (اختياري)')
+                .setStyle(ButtonStyle.Primary);
+
+            const skipBtn = new ButtonBuilder()
+                .setCustomId(`bc_img_skip_${ts3i}`)
+                .setLabel('تخطي العنوان')
+                .setStyle(ButtonStyle.Secondary);
+
+            const imgTriggerContainer = v2Container(
+                CONFIG.THEME.PRIMARY,
+                v2Text(`### ✏️ عنوان الـ Embed`),
+                v2Separator(),
+                v2Text(`▸ تبي تضيف عنوان للـ Embed ولا تتخطى؟`),
+                v2Separator(),
+                v2Text(`-# الخطوة 3 من 5`),
+                new ActionRowBuilder().addComponents(modalTriggerBtn, skipBtn)
+            );
+
+            const imgTriggerMsg = await channel.send(v2Message(imgTriggerContainer));
+
+            let embedTitle = null;
+
+            try {
+                const trigInt = await imgTriggerMsg.awaitMessageComponent({
+                    filter: i => i.user.id === userId && (i.customId === `bc_img_modal_trigger_${ts3i}` || i.customId === `bc_img_skip_${ts3i}`),
+                    componentType: ComponentType.Button,
+                    time: CONFIG.COLLECTOR_TIMEOUT
+                });
+
+                if (trigInt.customId === `bc_img_modal_trigger_${ts3i}`) {
+                    const modal = new ModalBuilder()
+                        .setCustomId(`bc_img_title_modal_${ts3i}`)
+                        .setTitle('عنوان الـ Embed');
+
+                    modal.addComponents(
+                        new ActionRowBuilder().addComponents(
+                            new TextInputBuilder()
+                                .setCustomId('img_title')
+                                .setLabel('العنوان')
+                                .setStyle(TextInputStyle.Short)
+                                .setRequired(true)
+                                .setMaxLength(256)
+                        )
+                    );
+
+                    await trigInt.showModal(modal);
+
+                    const modalInt = await trigInt.awaitModalSubmit({
+                        filter: i => i.customId === `bc_img_title_modal_${ts3i}`,
+                        time: CONFIG.COLLECTOR_TIMEOUT
+                    });
+
+                    embedTitle = modalInt.fields.getTextInputValue('img_title');
+                    await modalInt.update(v2Message(v2Container(CONFIG.THEME.MUTED, v2Text(`✓ العنوان: **${embedTitle}**`))));
+                } else {
+                    await trigInt.update(v2Message(v2Container(CONFIG.THEME.MUTED, v2Text(`✓ بدون عنوان`))));
+                }
+
+            } catch {
+                return imgTriggerMsg.edit(v2Message(v2Error('انتهى الوقت'))).catch(() => { });
+            }
+
+            // طلب الصورة
+            const imgResp = await collectText(channel, userId, '▸ أرسل **الصورة** — رابط أو ارفق ملف:');
+            if (!imgResp) return;
+
+            const imgUrl = extractImage(imgResp);
+            const bEmbed = new EmbedBuilder().setColor(CONFIG.THEME.PRIMARY).setTimestamp();
+            if (embedTitle) bEmbed.setTitle(embedTitle);
+            if (imgUrl) {
+                bEmbed.setImage(imgUrl);
+                broadcastContent.image = imgUrl;
+            }
+            broadcastContent.embed = bEmbed.toJSON();
+
+        } else {
+            // صورة عادية بدون embed
+            const imgResp = await collectText(channel, userId, '▸ أرسل **الصورة** — رابط أو ارفق ملف:');
+            if (!imgResp) return;
+            const imgUrl = extractImage(imgResp);
+            if (imgUrl) broadcastContent.image = imgUrl;
+        }
+    }
+
+    // ═══ الخطوة 4: وقت الإرسال ═══
+    const ts4 = uid();
+    const scheduleMenu = new StringSelectMenuBuilder()
+        .setCustomId(`bc_sched_${ts4}`)
+        .setPlaceholder('متى تبي ترسل؟')
+        .addOptions(CONFIG.SCHEDULE_OPTIONS.map(opt => ({
+            label: opt.label,
+            value: opt.value,
+            emoji: opt.emoji
+        })));
+
+    const step4Container = v2Container(
+        CONFIG.THEME.PINK,
+        v2Text(`### ◷ وقت الإرسال`),
+        v2Separator(),
+        v2Text(`▸ متى تبي ترسل البرودكاست؟`),
+        v2Separator(),
+        v2Text(`-# الخطوة 4 من 5 • التوقيت: الرياض`),
+        new ActionRowBuilder().addComponents(scheduleMenu)
+    );
+
+    const step4Msg = await channel.send(v2Message(step4Container));
+
+    let sendNow = false;
+    let scheduledTime = null;
+
+    try {
+        const schedInt = await step4Msg.awaitMessageComponent({
+            filter: i => i.user.id === userId && i.customId === `bc_sched_${ts4}`,
+            componentType: ComponentType.StringSelect,
+            time: CONFIG.COLLECTOR_TIMEOUT
+        });
+
+        const schedChoice = schedInt.values[0];
+        const schedOption = CONFIG.SCHEDULE_OPTIONS.find(o => o.value === schedChoice);
+
+        if (schedChoice === 'now') {
+            sendNow = true;
+            await schedInt.update(v2Message(v2Container(CONFIG.THEME.MUTED, v2Text(`✓ إرسال فوري`))));
+
+        } else if (schedOption.ms !== null) {
+            // وقت نسبي (بعد X)
+            scheduledTime = new Date(Date.now() + schedOption.ms).toISOString();
+            await schedInt.update(v2Message(v2Container(CONFIG.THEME.MUTED, v2Text(`✓ ${schedOption.label} — ${formatDate(scheduledTime)}`))));
+
+        } else if (schedChoice === 'tomorrow') {
+            await schedInt.update(v2Message(v2Container(CONFIG.THEME.MUTED, v2Text(`✓ غداً — حدد الساعة`))));
+
+            const timeResp = await collectText(channel, userId, '▸ اكتب الساعة بصيغة **HH:MM** (مثال: `14:30`):');
+            if (!timeResp) return;
+
+            const timeMatch = timeResp.content.trim().match(/^(\d{2}):(\d{2})$/);
+            if (!timeMatch) {
+                return channel.send(v2Message(v2Error('صيغة الوقت غلط — استخدم HH:MM')));
+            }
+
+            // حساب غداً بتوقيت الرياض
+            const now = new Date();
+            const riyadhNow = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Riyadh' }));
+            const tomorrow = new Date(riyadhNow);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            tomorrow.setHours(parseInt(timeMatch[1]), parseInt(timeMatch[2]), 0, 0);
+
+            // التحويل من توقيت الرياض لـ UTC
+            const tomorrowStr = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}T${timeMatch[1]}:${timeMatch[2]}:00+03:00`;
+            scheduledTime = new Date(tomorrowStr).toISOString();
+
+        } else if (schedChoice === 'custom') {
+            await schedInt.update(v2Message(v2Container(CONFIG.THEME.MUTED, v2Text(`✓ تاريخ مخصص`))));
+
+            const timeResp = await collectText(channel, userId, '▸ اكتب التاريخ والوقت بتوقيت الرياض:\n```\nالصيغة: YYYY-MM-DD HH:MM\nمثال:  2025-06-20 15:30\n```');
+            if (!timeResp) return;
+
+            const match = timeResp.content.trim().match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
+            if (!match) {
+                return channel.send(v2Message(v2Error('صيغة غلط — استخدم: `YYYY-MM-DD HH:MM`')));
+            }
+
+            const [, yr, mo, dy, hr, mn] = match;
+            const customDate = new Date(`${yr}-${mo}-${dy}T${hr}:${mn}:00+03:00`);
+
+            if (customDate <= new Date()) {
+                return channel.send(v2Message(v2Error('الوقت هذا في الماضي')));
+            }
+
+            scheduledTime = customDate.toISOString();
+        }
+
+        if (scheduledTime) {
+            broadcastContent.scheduledTime = scheduledTime;
+        }
+
+    } catch {
+        return step4Msg.edit(v2Message(v2Error('انتهى الوقت'))).catch(() => { });
+    }
+
+    // ═══ لو تجربة — نسأل عن العدد ═══
+    let testCount = 0;
+    if (isTest) {
+        const countResp = await collectText(channel, userId, '▸ كم عضو تبي ترسل لهم كتجربة؟');
+        if (!countResp) return;
+
+        testCount = parseInt(countResp.content);
+        if (isNaN(testCount) || testCount < 1) {
+            return channel.send(v2Message(v2Error('اكتب رقم صحيح أكبر من 0')));
+        }
+    }
+
+    // ═══ الخطوة 5: Preview + تأكيد ═══
+    // عرض المعاينة
+    const previewHeaderContainer = v2Container(
+        CONFIG.THEME.WARNING,
+        v2Text(`### ✦ معاينة الرسالة`),
+        v2Separator(),
+        v2Section(
+            `▸ السيرفر: **${message.guild.name}**\n▸ الأعضاء: **${message.guild.memberCount}**`,
+            message.guild.iconURL({ dynamic: true, size: 64 }) || undefined
+        ),
+        v2Separator(),
+        v2Text(`-# الخطوة 5 من 5 — تأكد من كل شي قبل الإرسال`)
+    );
+
+    await channel.send(v2Message(previewHeaderContainer));
+
+    // عرض المحتوى كما سيظهر في الـ DM (embed عادي)
+    const previewPayload = buildDmPayload(broadcastContent);
+    await channel.send(previewPayload);
+
+    // معلومات إضافية + أزرار
+    const ts5 = uid();
+    let extraInfo = '';
+    if (scheduledTime) extraInfo += `\n◷ الموعد: **${formatDate(scheduledTime)}**`;
+    if (isTest) extraInfo += `\n∗ تجربة: **${testCount}** عضو`;
+
+    const confirmBtn = new ButtonBuilder()
+        .setCustomId(`bc_confirm_${ts5}`)
+        .setLabel(sendNow ? '⚡ أرسل الحين' : '⏰ أكد الجدولة')
+        .setStyle(ButtonStyle.Success);
+
+    const cancelBtn = new ButtonBuilder()
+        .setCustomId(`bc_cancel_${ts5}`)
+        .setLabel('✗ إلغاء')
+        .setStyle(ButtonStyle.Danger);
+
+    const confirmContainer = v2Container(
+        CONFIG.THEME.WARNING,
+        v2Text(`### ⚡ تأكيد ${sendNow ? 'الإرسال' : 'الجدولة'}`),
+        v2Separator(),
+        v2Text(`▸ كل شي جاهز؟${extraInfo}`),
+        new ActionRowBuilder().addComponents(confirmBtn, cancelBtn)
+    );
+
+    const confirmMsg = await channel.send(v2Message(confirmContainer));
+
+    try {
+        const confInt = await confirmMsg.awaitMessageComponent({
+            filter: i => i.user.id === userId && (i.customId === `bc_confirm_${ts5}` || i.customId === `bc_cancel_${ts5}`),
+            componentType: ComponentType.Button,
+            time: CONFIG.COLLECTOR_TIMEOUT
+        });
+
+        if (confInt.customId === `bc_confirm_${ts5}`) {
+            await confInt.update(v2Message(v2Container(
+                CONFIG.THEME.SUCCESS,
+                v2Text(sendNow ? `### ⊳ جاري الإرسال...` : `### ◷ جاري الجدولة...`)
+            )));
+
+            if (sendNow) {
+                // لوق بدء الإرسال
+                await sendLog(guildId, CONFIG.THEME.LOG_WARNING,
+                    'بدء إرسال برودكاست',
+                    `▸ النوع: **${contentType}**\n▸ تجربة: **${isTest ? 'نعم — ' + testCount : 'لا'}**`,
+                    userId
+                );
+
+                await executeBroadcast(message.guild, channel, broadcastContent, isTest ? testCount : 0);
+            } else {
+                // حفظ الجدولة
+                const schedId = `s_${uid()}`;
+                const gd = getGuild(guildId);
+
+                const entry = {
+                    id: schedId,
+                    content: broadcastContent,
+                    scheduledTime,
+                    channelId: channel.id,
+                    createdBy: userId,
+                    createdAt: new Date().toISOString(),
+                    isTest,
+                    testCount
+                };
+
+                gd.scheduledMessages.push(entry);
+                saveGuild(guildId, gd);
+                startTimer(message.guild, entry);
+
+                const schedContainer = v2Container(
+                    CONFIG.THEME.PINK,
+                    v2Text(`### ✓ تم جدولة البرودكاست`),
+                    v2Separator(),
+                    v2Text(
+                        `⊿ المعرف: \`${schedId}\`\n` +
+                        `◷ الموعد: **${formatDate(scheduledTime)}**\n` +
+                        `◉ بواسطة: <@${userId}>`
+                    ),
+                    v2Separator(),
+                    v2Text(`-# يمكنك إلغاءها من ${CONFIG.PREFIX}scheduled`)
+                );
+
+                await channel.send(v2Message(schedContainer));
+
+                await sendLog(guildId, CONFIG.THEME.LOG_WARNING,
+                    'تم جدولة برودكاست',
+                    `⊿ المعرف: \`${schedId}\`\n◷ الموعد: **${formatDate(scheduledTime)}**`,
+                    userId
+                );
+            }
+
+        } else {
+            await confInt.update(v2Message(v2Container(CONFIG.THEME.DANGER, v2Text(`✗ تم إلغاء البرودكاست`))));
+        }
+
+    } catch {
+        confirmMsg.edit(v2Message(v2Error('انتهى الوقت'))).catch(() => { });
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  نظام الجدولة
+// ═══════════════════════════════════════════════════════════════
+
+function startTimer(guild, entry) {
     const delay = new Date(entry.scheduledTime).getTime() - Date.now();
 
     if (delay <= 0) {
-        executeScheduledMessage(guild, entry);
+        runScheduled(guild, entry);
         return;
     }
 
-    const timer = setTimeout(() => {
-        executeScheduledMessage(guild, entry);
-    }, delay);
-
-    activeSchedules.set(entry.id, timer);
+    const timer = setTimeout(() => runScheduled(guild, entry), delay);
+    activeTimers.set(entry.id, timer);
 }
 
-async function executeScheduledMessage(guild, entry) {
+async function runScheduled(guild, entry) {
     try {
-        const channel = await guild.channels.fetch(entry.channelId);
-        if (!channel) return;
+        const ch = await guild.channels.fetch(entry.channelId).catch(() => null);
+        if (!ch) return;
 
-        await channel.send({
-            embeds: [styledEmbed({
-                color: THEME.SOFT,
-                title: `${IC.clock} تنفيذ جدولة`,
-                description:
-                    `${IC.pin}  المعرف: \`${entry.id}\`\n` +
-                    `${IC.user}  بواسطة: <@${entry.createdBy}>`
-            })]
-        });
+        const notifyContainer = v2Container(
+            CONFIG.THEME.PINK,
+            v2Text(`### ◷ تنفيذ جدولة`),
+            v2Separator(),
+            v2Text(`⊿ المعرف: \`${entry.id}\`\n◉ بواسطة: <@${entry.createdBy}>`)
+        );
 
-        // لوق تنفيذ الجدولة
-        await sendLog(guild.id, buildLogEmbed(
+        await ch.send(v2Message(notifyContainer));
+
+        await sendLog(guild.id, CONFIG.THEME.LOG_WARNING,
             'تنفيذ جدولة تلقائي',
-            `${IC.pin} المعرف: \`${entry.id}\``,
+            `⊿ المعرف: \`${entry.id}\``,
             entry.createdBy
-        ));
+        );
 
-        await sendBroadcast(guild, channel, entry.content, entry.isTest ? entry.testCount : 0);
+        await executeBroadcast(guild, ch, entry.content, entry.isTest ? entry.testCount : 0);
 
-        const guildData = getGuildData(guild.id);
-        guildData.scheduledMessages = guildData.scheduledMessages.filter(s => s.id !== entry.id);
-        updateGuildData(guild.id, guildData);
-        activeSchedules.delete(entry.id);
+        // حذف الجدولة
+        const gd = getGuild(guild.id);
+        gd.scheduledMessages = gd.scheduledMessages.filter(s => s.id !== entry.id);
+        saveGuild(guild.id, gd);
+        activeTimers.delete(entry.id);
 
     } catch (err) {
         console.error('[SCHEDULE] خطأ:', err.message);
     }
 }
 
-async function loadScheduledMessages() {
+async function loadAllSchedules() {
     const data = loadData();
 
-    for (const [guildId, guildData] of Object.entries(data)) {
-        if (!guildData.scheduledMessages?.length) continue;
+    for (const [guildId, gd] of Object.entries(data)) {
+        if (!gd.scheduledMessages?.length) continue;
 
         const guild = client.guilds.cache.get(guildId);
         if (!guild) continue;
@@ -1031,682 +1101,461 @@ async function loadScheduledMessages() {
         const now = Date.now();
         const valid = [];
 
-        for (const sched of guildData.scheduledMessages) {
+        for (const sched of gd.scheduledMessages) {
             if (new Date(sched.scheduledTime).getTime() > now) {
                 valid.push(sched);
-                scheduleMessageTimer(guild, sched);
+                startTimer(guild, sched);
             } else {
-                executeScheduledMessage(guild, sched);
+                runScheduled(guild, sched);
             }
         }
 
-        guildData.scheduledMessages = valid;
-        updateGuildData(guildId, guildData);
+        gd.scheduledMessages = valid;
+        saveGuild(guildId, gd);
     }
 
     console.log('[SCHEDULE] تم تحميل الجدولات');
 }
 
-// ═══════════════════════════════════════
-//  معالجة الأوامر
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  الأحداث والأوامر
+// ═══════════════════════════════════════════════════════════════
 
 client.once('ready', async () => {
-    console.log(`\n  ${IC.star} البوت شغال: ${client.user.tag}`);
-    console.log(`  ${IC.dot} السيرفرات: ${client.guilds.cache.size}`);
-    console.log(`  ${IC.dot} الأعضاء: ${client.guilds.cache.reduce((a, g) => a + g.memberCount, 0)}\n`);
+    console.log(`\n  ✦ البوت شغال: ${client.user.tag}`);
+    console.log(`  ▸ السيرفرات: ${client.guilds.cache.size}`);
+    console.log(`  ▸ الأعضاء: ${client.guilds.cache.reduce((a, g) => a + g.memberCount, 0)}\n`);
 
     client.user.setPresence({
-        activities: [{ name: `${PREFIX}help`, type: ActivityType.Watching }],
+        activities: [{ name: `${CONFIG.PREFIX}help`, type: ActivityType.Watching }],
         status: 'online'
     });
 
-    await loadScheduledMessages();
+    await loadAllSchedules();
 
-    // لوق إعادة تشغيل البوت لكل السيرفرات اللي فيها لوق
+    // لوق تشغيل البوت
     const data = loadData();
-    for (const [guildId, guildData] of Object.entries(data)) {
-        if (guildData.logChannelId) {
-            await sendLog(guildId, styledEmbed({
-                color: THEME.GLOW,
-                title: `${IC.restart} البوت شغال`,
-                description:
-                    `${IC.dot} تم تشغيل البوت بنجاح\n` +
-                    `${IC.dot} السيرفرات: **${client.guilds.cache.size}**\n` +
-                    `${IC.dot} البينق: **${client.ws.ping}ms**`,
-                footer: formatDate(new Date())
-            }));
+    for (const [guildId, gd] of Object.entries(data)) {
+        if (gd.logChannelId) {
+            await sendLog(guildId, CONFIG.THEME.LOG_SUCCESS,
+                'البوت شغال',
+                `▸ السيرفرات: **${client.guilds.cache.size}**\n▸ البينق: **${client.ws.ping}ms**`,
+                'system'
+            );
         }
     }
 });
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
-    if (!message.content.startsWith(PREFIX)) return;
+    if (!message.content.startsWith(CONFIG.PREFIX)) return;
 
-    const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
-    const command = args.shift().toLowerCase();
+    const args = message.content.slice(CONFIG.PREFIX.length).trim().split(/\s+/);
+    const cmd = args.shift().toLowerCase();
 
-    // ━━━━━━ HELP ━━━━━━
-    if (command === 'help') {
-        const helpEmbed = styledEmbed({
-            color: THEME.ACCENT,
-            title: `${IC.star} الأوامر المتاحة`,
-            thumbnail: client.user.displayAvatarURL({ dynamic: true }),
-            description:
-                `مرحباً <@${message.author.id}> ${IC.wave}\n` +
-                `هذي كل الأوامر اللي تقدر تستخدمها:\n\n` +
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    //  HELP
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-                `${divider()}\n` +
-                `\` البرودكاست \`\n` +
-                `${divider()}\n\n` +
+    if (cmd === 'help') {
+        const container = v2Container(
+            CONFIG.THEME.PRIMARY,
+            v2Text(`### ✦ أوامر البوت`),
+            v2Separator(),
+            v2Text(`مرحباً <@${message.author.id}> 〜\nهذي كل الأوامر المتاحة:`),
+            v2Separator(SeparatorSpacingSize.Large),
 
-                `**${PREFIX}broadcast**\n` +
-                `${IC.corner} إنشاء وإرسال برودكاست جديد\n\n` +
+            // ── أوامر البرودكاست ──
+            v2Text(`\` البرودكاست \``),
+            v2Separator(),
 
-                `**${PREFIX}broadcast test**\n` +
-                `${IC.corner} تجربة الإرسال لعدد محدد\n\n` +
+            v2SectionButton(
+                `**${CONFIG.PREFIX}broadcast**\n-# إنشاء وإرسال برودكاست جديد`,
+                new ButtonBuilder().setCustomId('h_1').setLabel('📤').setStyle(ButtonStyle.Secondary).setDisabled(true)
+            ),
+            v2SectionButton(
+                `**${CONFIG.PREFIX}broadcast test**\n-# تجربة الإرسال لعدد محدد`,
+                new ButtonBuilder().setCustomId('h_2').setLabel('🧪').setStyle(ButtonStyle.Secondary).setDisabled(true)
+            ),
+            v2SectionButton(
+                `**${CONFIG.PREFIX}scheduled**\n-# عرض وإدارة الرسائل المجدولة`,
+                new ButtonBuilder().setCustomId('h_3').setLabel('⏰').setStyle(ButtonStyle.Secondary).setDisabled(true)
+            ),
+            v2SectionButton(
+                `**${CONFIG.PREFIX}resend**\n-# إعادة إرسال آخر برودكاست`,
+                new ButtonBuilder().setCustomId('h_4').setLabel('🔄').setStyle(ButtonStyle.Secondary).setDisabled(true)
+            ),
+            v2SectionButton(
+                `**${CONFIG.PREFIX}stats**\n-# إحصائيات الإرسال`,
+                new ButtonBuilder().setCustomId('h_5').setLabel('📊').setStyle(ButtonStyle.Secondary).setDisabled(true)
+            ),
 
-                `**${PREFIX}scheduled**\n` +
-                `${IC.corner} عرض وإدارة الرسائل المجدولة\n\n` +
+            v2Separator(SeparatorSpacingSize.Large),
+            v2Text(`\` الإدارة ♛ \``),
+            v2Separator(),
 
-                `**${PREFIX}resend**\n` +
-                `${IC.corner} إعادة إرسال آخر برودكاست\n\n` +
+            v2SectionButton(
+                `**${CONFIG.PREFIX}admin**\n-# إعدادات البوت والأدمنز`,
+                new ButtonBuilder().setCustomId('h_6').setLabel('⚙️').setStyle(ButtonStyle.Secondary).setDisabled(true)
+            ),
+            v2SectionButton(
+                `**${CONFIG.PREFIX}setlog**\n-# تحديد قناة السجل`,
+                new ButtonBuilder().setCustomId('h_7').setLabel('📋').setStyle(ButtonStyle.Secondary).setDisabled(true)
+            ),
+            v2SectionButton(
+                `**${CONFIG.PREFIX}owner**\n-# لوحة تحكم المالك`,
+                new ButtonBuilder().setCustomId('h_8').setLabel('👑').setStyle(ButtonStyle.Secondary).setDisabled(true)
+            ),
+            v2SectionButton(
+                `**${CONFIG.PREFIX}restart**\n-# إعادة تشغيل البوت`,
+                new ButtonBuilder().setCustomId('h_9').setLabel('🔁').setStyle(ButtonStyle.Secondary).setDisabled(true)
+            ),
 
-                `**${PREFIX}stats**\n` +
-                `${IC.corner} إحصائيات الإرسال\n\n` +
+            v2Separator(),
+            v2Text(`-# البادئة: ${CONFIG.PREFIX} • التوقيت: الرياض`)
+        );
 
-                `${divider()}\n` +
-                `\` الإدارة \`\n` +
-                `${divider()}\n\n` +
-
-                `**${PREFIX}admin**\n` +
-                `${IC.corner} إعدادات البوت والأدمنز ${IC.crown}\n\n` +
-
-                `**${PREFIX}owner**\n` +
-                `${IC.corner} لوحة تحكم المالك ${IC.crown}\n\n` +
-
-                `**${PREFIX}setlog**\n` +
-                `${IC.corner} تحديد قناة سجل العمليات ${IC.crown}\n\n` +
-
-                `**${PREFIX}restart**\n` +
-                `${IC.corner} إعادة تشغيل البوت ${IC.crown}\n\n` +
-
-                `${divider()}`,
-            footer: `البادئة: ${PREFIX} ${IC.dot} التوقيت: الرياض`
-        });
-
-        await message.reply({ embeds: [helpEmbed] });
+        await message.reply(v2Message(container));
     }
 
-    // ━━━━━━ BROADCAST ━━━━━━
-    else if (command === 'broadcast') {
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    //  BROADCAST + BROADCAST TEST
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    else if (cmd === 'broadcast') {
         if (!isAdmin(message.author.id, message.guild.id)) {
-            return message.reply({
-                embeds: [styledEmbed({
-                    color: THEME.ROSE,
-                    description: `${IC.lock} ما عندك صلاحية — لازم تكون Admin أو Owner`
-                })]
-            });
+            return message.reply(v2Message(v2Error('ما عندك صلاحية — لازم تكون Admin أو Owner')));
         }
 
         const isTest = args[0]?.toLowerCase() === 'test';
-        await startBroadcastFlow(message, isTest);
+        await broadcastFlow(message, isTest);
     }
 
-    // ━━━━━━ SCHEDULED ━━━━━━
-    else if (command === 'scheduled') {
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    //  SCHEDULED
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    else if (cmd === 'scheduled') {
         if (!isAdmin(message.author.id, message.guild.id)) {
-            return message.reply({
-                embeds: [styledEmbed({
-                    color: THEME.ROSE,
-                    description: `${IC.lock} ما عندك صلاحية`
-                })]
-            });
+            return message.reply(v2Message(v2Error('ما عندك صلاحية')));
         }
 
-        const guildData = getGuildData(message.guild.id);
-        const schedules = guildData.scheduledMessages || [];
+        const gd = getGuild(message.guild.id);
+        const scheds = gd.scheduledMessages || [];
 
-        if (schedules.length === 0) {
-            return message.reply({
-                embeds: [styledEmbed({
-                    color: THEME.MAIN,
-                    title: `${IC.clock} الرسائل المجدولة`,
-                    description: `${IC.ring} ما في رسائل مجدولة حالياً`
-                })]
-            });
+        if (scheds.length === 0) {
+            const emptyContainer = v2Container(
+                CONFIG.THEME.MUTED,
+                v2Text(`### ◷ الرسائل المجدولة`),
+                v2Separator(),
+                v2Text(`○ لا توجد جدولات نشطة`)
+            );
+            return message.reply(v2Message(emptyContainer));
         }
 
-        let schedList = `${divider()}\n\n`;
+        // بناء الـ container بـ section لكل جدولة
+        const components = [
+            v2Text(`### ◷ الرسائل المجدولة — ${scheds.length}`),
+            v2Separator()
+        ];
 
-        const buttons = [];
+        for (let i = 0; i < scheds.length; i++) {
+            const s = scheds[i];
+            const typeLabel = s.content.type === 'text_only' ? 'نص' : s.content.type === 'image_only' ? 'صورة' : 'نص + صورة';
 
-        schedules.forEach((s, i) => {
-            const typeLabel = s.content.type === 'text_only' ? 'نص' :
-                s.content.type === 'image_only' ? 'صورة' : 'نص + صورة';
+            const cancelBtn = new ButtonBuilder()
+                .setCustomId(`csched_${s.id}`)
+                .setLabel(`إلغاء`)
+                .setStyle(ButtonStyle.Danger);
 
-            schedList +=
-                `**${IC.pin} جدولة #${i + 1}**\n` +
-                `${IC.bar}  المعرف: \`${s.id}\`\n` +
-                `${IC.bar}  الموعد: **${formatDate(s.scheduledTime)}**\n` +
-                `${IC.bar}  النوع: **${typeLabel}**\n` +
-                `${IC.bar}  بواسطة: <@${s.createdBy}>\n` +
-                `${IC.corner}  تجربة: **${s.isTest ? 'نعم' : 'لا'}**\n\n`;
+            components.push(
+                v2SectionButton(
+                    `**جدولة #${i + 1}**\n` +
+                    `-# المعرف: \`${s.id}\`\n` +
+                    `-# الموعد: ${formatDate(s.scheduledTime)}\n` +
+                    `-# النوع: ${typeLabel} • بواسطة: <@${s.createdBy}>`,
+                    cancelBtn
+                )
+            );
 
-            if (buttons.length < 25) {
-                buttons.push(
-                    new ButtonBuilder()
-                        .setCustomId(`csched_${s.id}`)
-                        .setLabel(`إلغاء #${i + 1}`)
-                        .setStyle(ButtonStyle.Danger)
-                );
-            }
-        });
-
-        schedList += divider();
-
-        const rows = [];
-        for (let i = 0; i < buttons.length; i += 5) {
-            rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
+            if (i < scheds.length - 1) components.push(v2Separator());
         }
 
-        const schedMsg = await message.reply({
-            embeds: [styledEmbed({
-                color: THEME.SOFT,
-                title: `${IC.clock} الرسائل المجدولة — ${schedules.length}`,
-                description: schedList
-            })],
-            components: rows
-        });
+        const container = v2Container(CONFIG.THEME.PINK, ...components);
+        const schedMsg = await message.reply(v2Message(container));
 
+        // الاستماع لأزرار الإلغاء
         const collector = schedMsg.createMessageComponentCollector({
             filter: i => i.user.id === message.author.id,
             componentType: ComponentType.Button,
-            time: COLLECTOR_TIMEOUT
+            time: CONFIG.COLLECTOR_TIMEOUT
         });
 
         collector.on('collect', async (int) => {
             const schedId = int.customId.replace('csched_', '');
 
-            if (activeSchedules.has(schedId)) {
-                clearTimeout(activeSchedules.get(schedId));
-                activeSchedules.delete(schedId);
+            if (activeTimers.has(schedId)) {
+                clearTimeout(activeTimers.get(schedId));
+                activeTimers.delete(schedId);
             }
 
-            const currentData = getGuildData(message.guild.id);
-            currentData.scheduledMessages = currentData.scheduledMessages.filter(s => s.id !== schedId);
-            updateGuildData(message.guild.id, currentData);
+            const currentGd = getGuild(message.guild.id);
+            currentGd.scheduledMessages = currentGd.scheduledMessages.filter(s => s.id !== schedId);
+            saveGuild(message.guild.id, currentGd);
 
-            await int.update({
-                embeds: [styledEmbed({
-                    color: THEME.GLOW,
-                    title: `${IC.check} تم الإلغاء`,
-                    description: `تم إلغاء الجدولة: \`${schedId}\``
-                })],
-                components: []
-            });
+            await int.update(v2Message(v2Success(`تم إلغاء الجدولة: \`${schedId}\``)));
 
-            // سجل العملية في نفس الروم
-            await message.channel.send({
-                embeds: [styledEmbed({
-                    color: THEME.WARM,
-                    description:
-                        `${IC.pin} **إلغاء جدولة**\n\n` +
-                        `${IC.dot} المعرف: \`${schedId}\`\n` +
-                        `${IC.dot} بواسطة: <@${int.user.id}>\n` +
-                        `${IC.dot} الوقت: ${formatDate(new Date())}`
-                })]
-            });
-
-            // لوق
-            await sendLog(message.guild.id, buildLogEmbed(
+            await sendLog(message.guild.id, CONFIG.THEME.LOG_ERROR,
                 'تم إلغاء جدولة',
-                `${IC.pin} المعرف: \`${schedId}\``,
+                `⊿ المعرف: \`${schedId}\``,
                 int.user.id
-            ));
+            );
+
+            collector.stop();
         });
 
         collector.on('end', async (_, reason) => {
             if (reason === 'time') {
-                try { await schedMsg.edit({ components: [] }); } catch { }
+                try { await schedMsg.edit(v2Message(v2Container(CONFIG.THEME.MUTED, v2Text(`-# انتهى وقت التفاعل`)))); } catch { }
             }
         });
     }
 
-    // ━━━━━━ RESEND ━━━━━━
-    else if (command === 'resend') {
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    //  RESEND
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    else if (cmd === 'resend') {
         if (!isAdmin(message.author.id, message.guild.id)) {
-            return message.reply({
-                embeds: [styledEmbed({
-                    color: THEME.ROSE,
-                    description: `${IC.lock} ما عندك صلاحية`
-                })]
-            });
+            return message.reply(v2Message(v2Error('ما عندك صلاحية')));
         }
 
-        const guildData = getGuildData(message.guild.id);
+        const gd = getGuild(message.guild.id);
 
-        if (!guildData.lastBroadcast) {
-            return message.reply({
-                embeds: [styledEmbed({
-                    color: THEME.MAIN,
-                    title: `${IC.send} إعادة إرسال`,
-                    description: `${IC.ring} ما في برودكاست سابق لإعادة إرساله`
-                })]
-            });
+        if (!gd.lastBroadcast) {
+            return message.reply(v2Message(v2Container(
+                CONFIG.THEME.MUTED,
+                v2Text(`### ⊳ إعادة إرسال`),
+                v2Separator(),
+                v2Text(`○ ما في برودكاست سابق`)
+            )));
         }
 
-        const last = guildData.lastBroadcast;
+        const last = gd.lastBroadcast;
 
-        await message.channel.send({
-            embeds: [styledEmbed({
-                color: THEME.WARM,
-                title: `${IC.star} معاينة آخر برودكاست`,
-                description:
-                    `${IC.clock} تم إرساله: **${formatDate(last.timestamp)}**\n\n` +
-                    `${IC.check} وصل: **${last.stats.delivered}**\n` +
-                    `${IC.cross} فشل: **${last.stats.failed}**\n` +
-                    `${IC.lock} مقفل: **${last.stats.blocked}**`
-            })]
-        });
-
-        const preview = buildMessagePayload(last.content);
-        await message.channel.send(preview);
-
-        const ts = Date.now();
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId(`rs_yes_${ts}`)
-                .setLabel('أعد الإرسال')
-                .setStyle(ButtonStyle.Success),
-            new ButtonBuilder()
-                .setCustomId(`rs_no_${ts}`)
-                .setLabel('إلغاء')
-                .setStyle(ButtonStyle.Danger)
+        // معاينة
+        const previewContainer = v2Container(
+            CONFIG.THEME.WARNING,
+            v2Text(`### ✦ معاينة آخر برودكاست`),
+            v2Separator(),
+            v2Text(
+                `◷ تم إرساله: **${formatDate(last.timestamp)}**\n\n` +
+                `✓ وصل: **${last.stats.delivered}**\n` +
+                `✗ فشل: **${last.stats.failed}**\n` +
+                `⊘ مقفل: **${last.stats.blocked}**`
+            )
         );
 
-        const confirmMsg = await message.channel.send({
-            embeds: [styledEmbed({
-                color: THEME.WARM,
-                description: `${IC.dot} تأكيد إعادة الإرسال لكل الأعضاء؟`
-            })],
-            components: [row]
-        });
+        await message.channel.send(v2Message(previewContainer));
+
+        // عرض المحتوى
+        const preview = buildDmPayload(last.content);
+        await message.channel.send(preview);
+
+        // تأكيد
+        const ts = uid();
+        const confirmBtn = new ButtonBuilder().setCustomId(`rs_yes_${ts}`).setLabel('أعد الإرسال').setStyle(ButtonStyle.Success);
+        const cancelBtn = new ButtonBuilder().setCustomId(`rs_no_${ts}`).setLabel('إلغاء').setStyle(ButtonStyle.Danger);
+
+        const confirmContainer = v2Container(
+            CONFIG.THEME.WARNING,
+            v2Text(`▸ تأكيد إعادة الإرسال؟`),
+            new ActionRowBuilder().addComponents(confirmBtn, cancelBtn)
+        );
+
+        const confirmMsg = await message.channel.send(v2Message(confirmContainer));
 
         try {
             const int = await confirmMsg.awaitMessageComponent({
                 filter: i => i.user.id === message.author.id,
                 componentType: ComponentType.Button,
-                time: COLLECTOR_TIMEOUT
+                time: CONFIG.COLLECTOR_TIMEOUT
             });
 
             if (int.customId === `rs_yes_${ts}`) {
-                await int.update({
-                    embeds: [styledEmbed({
-                        color: THEME.GLOW,
-                        description: `${IC.send} جاري إعادة الإرسال...`
-                    })],
-                    components: []
-                });
+                await int.update(v2Message(v2Container(CONFIG.THEME.SUCCESS, v2Text(`### ⊳ جاري إعادة الإرسال...`))));
 
-                // لوق
-                await sendLog(message.guild.id, buildLogEmbed(
-                    'إعادة إرسال برودكاست',
-                    `${IC.dot} إعادة إرسال آخر برودكاست`,
-                    message.author.id
-                ));
+                await sendLog(message.guild.id, CONFIG.THEME.LOG_WARNING,
+                    'إعادة إرسال برودكاست', '▸ إعادة إرسال آخر برودكاست', message.author.id
+                );
 
-                await sendBroadcast(message.guild, message.channel, last.content, 0);
+                await executeBroadcast(message.guild, message.channel, last.content, 0);
             } else {
-                await int.update({
-                    embeds: [styledEmbed({
-                        color: THEME.ROSE,
-                        description: `${IC.cross} تم الإلغاء`
-                    })],
-                    components: []
-                });
+                await int.update(v2Message(v2Container(CONFIG.THEME.DANGER, v2Text(`✗ تم الإلغاء`))));
             }
         } catch {
-            await confirmMsg.edit({
-                embeds: [styledEmbed({ color: THEME.ROSE, description: `${IC.cross} انتهى الوقت` })],
-                components: []
-            });
+            confirmMsg.edit(v2Message(v2Error('انتهى الوقت'))).catch(() => { });
         }
     }
 
-    // ━━━━━━ STATS ━━━━━━
-    else if (command === 'stats') {
-        const guildData = getGuildData(message.guild.id);
-        const s = guildData.stats;
-        const total = s.totalDelivered + s.totalFailed + s.totalBlocked;
-        const rate = total > 0 ? Math.round((s.totalDelivered / total) * 100) : 0;
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    //  STATS
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-        const statsEmbed = styledEmbed({
-            color: THEME.FROST,
-            title: `${IC.chart} إحصائيات السيرفر`,
-            thumbnail: message.guild.iconURL({ dynamic: true }),
-            description:
-                `${divider()}\n\n` +
+    else if (cmd === 'stats') {
+        const gd = getGuild(message.guild.id);
+        const st = gd.stats;
+        const total = st.totalDelivered + st.totalFailed + st.totalBlocked;
+        const rate = total > 0 ? Math.round((st.totalDelivered / total) * 100) : 0;
 
-                `${IC.send}  البرودكاست المرسلة\n` +
-                `\`\`\`${s.totalBroadcasts}\`\`\`\n` +
+        const container = v2Container(
+            CONFIG.THEME.INFO,
+            v2Text(`### ◈ إحصائيات السيرفر`),
+            v2Separator(),
 
-                `${IC.check}  رسائل وصلت بنجاح\n` +
-                `\`\`\`${s.totalDelivered}\`\`\`\n` +
+            v2Section(
+                `**${message.guild.name}**\n-# ${message.guild.memberCount} عضو`,
+                message.guild.iconURL({ dynamic: true, size: 64 }) || undefined
+            ),
 
-                `${IC.cross}  رسائل فشلت\n` +
-                `\`\`\`${s.totalFailed}\`\`\`\n` +
+            v2Separator(),
 
-                `${IC.lock}  أعضاء خاصهم مقفل\n` +
-                `\`\`\`${s.totalBlocked}\`\`\`\n` +
+            v2Text(
+                `⊳ البرودكاست المرسلة: **${st.totalBroadcasts}**\n` +
+                `✓ رسائل وصلت: **${st.totalDelivered}**\n` +
+                `✗ رسائل فشلت: **${st.totalFailed}**\n` +
+                `⊘ خاص مقفل: **${st.totalBlocked}**\n\n` +
+                `◈ نسبة الوصول:\n\`${progressBar(rate)}\``
+            ),
 
-                `${IC.chart}  نسبة الوصول\n` +
-                `${progressBar(rate)}\n\n` +
+            v2Separator(),
 
-                `${IC.user}  أعضاء السيرفر: **${message.guild.memberCount}**\n` +
-                `${IC.clock}  مجدولة: **${(guildData.scheduledMessages || []).length}**\n\n` +
+            v2Text(
+                `◷ مجدولة: **${(gd.scheduledMessages || []).length}**\n\n` +
+                `⊿ آخر برودكاست:\n` +
+                `${gd.lastBroadcast ? `\`${formatDate(gd.lastBroadcast.timestamp)}\`` : '`لم يتم الإرسال بعد`'}`
+            ),
 
-                `${divider()}\n\n` +
+            v2Separator(),
+            v2Text(`-# ${message.guild.name}`)
+        );
 
-                `${IC.pin}  آخر برودكاست:\n` +
-                `${guildData.lastBroadcast
-                    ? `\`${formatDate(guildData.lastBroadcast.timestamp)}\``
-                    : `\`لم يتم الإرسال بعد\``
-                }`,
-
-            footer: `${message.guild.name}`
-        });
-
-        await message.reply({ embeds: [statsEmbed] });
+        await message.reply(v2Message(container));
     }
 
-    // ━━━━━━ SETLOG — تحديد قناة اللوق ━━━━━━
-    else if (command === 'setlog') {
-        // Owner فقط يقدر يحدد قناة اللوق
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    //  SETLOG
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    else if (cmd === 'setlog') {
         if (!isOwner(message.author.id)) {
-            return message.reply({
-                embeds: [styledEmbed({
-                    color: THEME.ROSE,
-                    description: `${IC.crown} هذا الأمر خاص بالمالك فقط`
-                })]
-            });
+            return message.reply(v2Message(v2Error('هذا الأمر خاص بالمالك فقط')));
         }
 
-        const guildData = getGuildData(message.guild.id);
+        const gd = getGuild(message.guild.id);
+        const currentLog = gd.logChannelId
+            ? `● القناة الحالية: <#${gd.logChannelId}>`
+            : `○ ما في قناة لوق محددة`;
 
-        // خيارات: تحديد القناة الحالية / كتابة آيدي / إلغاء اللوق
+        const ts = uid();
         const logMenu = new StringSelectMenuBuilder()
-            .setCustomId(`setlog_menu_${Date.now()}`)
+            .setCustomId(`setlog_${ts}`)
             .setPlaceholder('اختر...')
             .addOptions([
-                {
-                    label: 'هذي القناة',
-                    description: `تحديد القناة الحالية كقناة لوق`,
-                    value: 'current',
-                    emoji: '📌'
-                },
-                {
-                    label: 'قناة ثانية',
-                    description: 'أكتب آيدي القناة أو اسوي لها منشن',
-                    value: 'other',
-                    emoji: '🔗'
-                },
-                {
-                    label: 'إلغاء اللوق',
-                    description: 'إيقاف إرسال السجلات',
-                    value: 'disable',
-                    emoji: '🚫'
-                }
+                { label: 'هذي القناة', description: 'القناة الحالية', value: 'current', emoji: '📌' },
+                { label: 'قناة ثانية', description: 'اكتب الآيدي أو المنشن', value: 'other', emoji: '🔗' },
+                { label: 'إلغاء اللوق', description: 'إيقاف السجلات', value: 'disable', emoji: '🚫' }
             ]);
 
-        // عرض الحالة الحالية
-        const currentLog = guildData.logChannelId
-            ? `${IC.filled} القناة الحالية: <#${guildData.logChannelId}>`
-            : `${IC.ring} ما في قناة لوق محددة`;
+        const container = v2Container(
+            CONFIG.THEME.GOLD,
+            v2Text(`### ◎ إعداد قناة السجل`),
+            v2Separator(),
+            v2Text(`${currentLog}\n\n▸ اختر وين تبي تنرسل السجلات:`),
+            new ActionRowBuilder().addComponents(logMenu)
+        );
 
-        const logMsg = await message.reply({
-            embeds: [styledEmbed({
-                color: THEME.GOLD,
-                title: `${IC.log} إعداد قناة السجل`,
-                description:
-                    `${currentLog}\n\n` +
-                    `${IC.dot} اختر وين تبي تنرسل السجلات:`,
-                footer: 'كل العمليات بتنسجل في القناة المحددة'
-            })],
-            components: [new ActionRowBuilder().addComponents(logMenu)]
-        });
+        const logMsg = await message.reply(v2Message(container));
 
         try {
             const logInt = await logMsg.awaitMessageComponent({
-                filter: i => i.user.id === message.author.id,
+                filter: i => i.user.id === message.author.id && i.customId === `setlog_${ts}`,
                 componentType: ComponentType.StringSelect,
-                time: COLLECTOR_TIMEOUT
+                time: CONFIG.COLLECTOR_TIMEOUT
             });
 
-            const logChoice = logInt.values[0];
+            const choice = logInt.values[0];
 
-            if (logChoice === 'current') {
-                // تحديد القناة الحالية
-                guildData.logChannelId = message.channel.id;
-                updateGuildData(message.guild.id, guildData);
+            if (choice === 'current') {
+                gd.logChannelId = message.channel.id;
+                saveGuild(message.guild.id, gd);
 
-                await logInt.update({
-                    embeds: [styledEmbed({
-                        color: THEME.GLOW,
-                        title: `${IC.check} تم تحديد قناة السجل`,
-                        description:
-                            `${IC.dot} القناة: <#${message.channel.id}>\n` +
-                            `${IC.dot} كل العمليات بتنسجل هنا\n\n` +
-                            `\`${IC.user} ${message.author.tag} ${IC.dot} ${formatDate(new Date())}\``
-                    })],
-                    components: []
-                });
+                await logInt.update(v2Message(v2Success(`تم تحديد <#${message.channel.id}> كقناة سجل`)));
 
-                // إرسال لوق تأكيدي
-                await sendLog(message.guild.id, styledEmbed({
-                    color: THEME.GLOW,
-                    title: `${IC.log} تم تفعيل السجل`,
-                    description:
-                        `${IC.dot} هذي القناة صارت قناة سجل العمليات\n` +
-                        `${IC.dot} كل الأحداث بتنسجل هنا تلقائياً`,
-                    footer: `بواسطة: ${message.author.tag}`
-                }));
-
-            } else if (logChoice === 'other') {
-                await logInt.update({
-                    embeds: [styledEmbed({
-                        color: THEME.GOLD,
-                        description: `${IC.dot} جاري التحضير...`
-                    })],
-                    components: []
-                });
-
-                const chResp = await collectMessage(message.channel, message.author.id,
-                    `${IC.dot} اكتب **آيدي القناة** أو اسوي لها **منشن** (#channel):`
+                await sendLog(message.guild.id, CONFIG.THEME.LOG_SUCCESS,
+                    'تم تفعيل السجل',
+                    '▸ هذي القناة صارت قناة سجل العمليات',
+                    message.author.id
                 );
+
+            } else if (choice === 'other') {
+                await logInt.update(v2Message(v2Container(CONFIG.THEME.GOLD, v2Text(`▸ جاري التحضير...`))));
+
+                const chResp = await collectText(message.channel, message.author.id, '▸ اكتب **آيدي القناة** أو اسوي لها **منشن** (#channel):');
                 if (!chResp) return;
 
-                // استخراج آيدي القناة
-                let channelId = chResp.content.replace(/[<#>]/g, '').trim();
+                const channelId = chResp.content.replace(/[<#>]/g, '').trim();
+                const targetCh = await message.guild.channels.fetch(channelId).catch(() => null);
 
-                // التحقق إن القناة موجودة
-                const targetChannel = await message.guild.channels.fetch(channelId).catch(() => null);
-
-                if (!targetChannel) {
-                    return message.channel.send({
-                        embeds: [styledEmbed({
-                            color: THEME.ROSE,
-                            description: `${IC.cross} ما لقيت هالقناة — تأكد من الآيدي`
-                        })]
-                    });
+                if (!targetCh) {
+                    return message.channel.send(v2Message(v2Error('ما لقيت هالقناة')));
                 }
 
-                // التحقق إن البوت يقدر يرسل فيها
-                const botPermissions = targetChannel.permissionsFor(client.user);
-                if (!botPermissions || !botPermissions.has('SendMessages')) {
-                    return message.channel.send({
-                        embeds: [styledEmbed({
-                            color: THEME.ROSE,
-                            description: `${IC.cross} ما أقدر أرسل في هالقناة — تحقق من الصلاحيات`
-                        })]
-                    });
+                const perms = targetCh.permissionsFor(client.user);
+                if (!perms || !perms.has('SendMessages')) {
+                    return message.channel.send(v2Message(v2Error('ما أقدر أرسل في هالقناة — تحقق من الصلاحيات')));
                 }
 
-                guildData.logChannelId = channelId;
-                updateGuildData(message.guild.id, guildData);
+                gd.logChannelId = channelId;
+                saveGuild(message.guild.id, gd);
 
-                await message.channel.send({
-                    embeds: [styledEmbed({
-                        color: THEME.GLOW,
-                        title: `${IC.check} تم تحديد قناة السجل`,
-                        description:
-                            `${IC.dot} القناة: <#${channelId}>\n` +
-                            `${IC.dot} كل العمليات بتنسجل هناك\n\n` +
-                            `\`${IC.user} ${message.author.tag} ${IC.dot} ${formatDate(new Date())}\``
-                    })]
-                });
+                await message.channel.send(v2Message(v2Success(`تم تحديد <#${channelId}> كقناة سجل`)));
 
-                // إرسال لوق تأكيدي في القناة الجديدة
-                await sendLog(message.guild.id, styledEmbed({
-                    color: THEME.GLOW,
-                    title: `${IC.log} تم تفعيل السجل`,
-                    description:
-                        `${IC.dot} هذي القناة صارت قناة سجل العمليات\n` +
-                        `${IC.dot} كل الأحداث بتنسجل هنا تلقائياً`,
-                    footer: `بواسطة: ${message.author.tag}`
-                }));
-
-            } else if (logChoice === 'disable') {
-                const oldChannel = guildData.logChannelId;
-                guildData.logChannelId = null;
-                updateGuildData(message.guild.id, guildData);
-
-                await logInt.update({
-                    embeds: [styledEmbed({
-                        color: THEME.WARM,
-                        title: `${IC.check} تم إلغاء قناة السجل`,
-                        description:
-                            `${IC.dot} ما بيتم تسجيل أي عملية بعد الحين\n` +
-                            `${IC.dot} تقدر تفعلها مرة ثانية بـ \`${PREFIX}setlog\`\n\n` +
-                            `\`${IC.user} ${message.author.tag} ${IC.dot} ${formatDate(new Date())}\``
-                    })],
-                    components: []
-                });
-            }
-
-        } catch {
-            try {
-                await logMsg.edit({
-                    embeds: [styledEmbed({ color: THEME.ROSE, description: `${IC.cross} انتهى الوقت` })],
-                    components: []
-                });
-            } catch { }
-        }
-    }
-
-    // ━━━━━━ RESTART — إعادة تشغيل البوت ━━━━━━
-    else if (command === 'restart') {
-        // Owner فقط
-        if (!isOwner(message.author.id)) {
-            return message.reply({
-                embeds: [styledEmbed({
-                    color: THEME.ROSE,
-                    description: `${IC.crown} هذا الأمر خاص بالمالك فقط`
-                })]
-            });
-        }
-
-        // تأكيد قبل الريستارت
-        const ts = Date.now();
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId(`rst_yes_${ts}`)
-                .setLabel('أعد التشغيل')
-                .setStyle(ButtonStyle.Danger),
-            new ButtonBuilder()
-                .setCustomId(`rst_no_${ts}`)
-                .setLabel('إلغاء')
-                .setStyle(ButtonStyle.Secondary)
-        );
-
-        const restartMsg = await message.reply({
-            embeds: [styledEmbed({
-                color: THEME.WARM,
-                title: `${IC.restart} إعادة تشغيل`,
-                description:
-                    `${IC.dot} متأكد تبي تسوي ريستارت للبوت؟\n\n` +
-                    `${IC.bar} البوت بيطفى ويرجع يشتغل\n` +
-                    `${IC.bar} الجدولات المحفوظة ما بتتأثر\n` +
-                    `${IC.corner} وقت التشغيل الحالي: **${formatUptime(client.uptime)}**`,
-                footer: 'البوت بيرجع يشتغل تلقائي لو على Railway أو PM2'
-            })],
-            components: [row]
-        });
-
-        try {
-            const int = await restartMsg.awaitMessageComponent({
-                filter: i => i.user.id === message.author.id,
-                componentType: ComponentType.Button,
-                time: 30000 // 30 ثانية فقط للريستارت
-            });
-
-            if (int.customId === `rst_yes_${ts}`) {
-                await int.update({
-                    embeds: [styledEmbed({
-                        color: THEME.GLOW,
-                        title: `${IC.restart} جاري إعادة التشغيل...`,
-                        description:
-                            `${IC.dot} البوت بيطفى الحين\n` +
-                            `${IC.dot} بيرجع يشتغل خلال ثواني\n\n` +
-                            `\`${IC.user} ${message.author.tag} ${IC.dot} ${formatDate(new Date())}\``
-                    })],
-                    components: []
-                });
-
-                // لوق قبل الإغلاق
-                await sendLog(message.guild.id, buildLogEmbed(
-                    'إعادة تشغيل البوت',
-                    `${IC.dot} تم طلب ريستارت\n${IC.dot} البوت بيرجع يشتغل تلقائي`,
+                await sendLog(message.guild.id, CONFIG.THEME.LOG_SUCCESS,
+                    'تم تفعيل السجل',
+                    '▸ هذي القناة صارت قناة سجل العمليات',
                     message.author.id
-                ));
+                );
 
-                // انتظار ثانية عشان الرسالة توصل
-                await sleep(1500);
+            } else if (choice === 'disable') {
+                gd.logChannelId = null;
+                saveGuild(message.guild.id, gd);
 
-                // إنهاء العملية — Railway/PM2/systemd بيعيد تشغيله تلقائي
-                process.exit(0);
-
-            } else {
-                await int.update({
-                    embeds: [styledEmbed({
-                        color: THEME.MAIN,
-                        description: `${IC.dot} تم إلغاء إعادة التشغيل`
-                    })],
-                    components: []
-                });
+                await logInt.update(v2Message(v2Container(
+                    CONFIG.THEME.WARNING,
+                    v2Text(`### ✓ تم إلغاء قناة السجل`),
+                    v2Separator(),
+                    v2Text(`▸ ما بيتم تسجيل أي عملية\n▸ تقدر تفعلها مرة ثانية بـ \`${CONFIG.PREFIX}setlog\``)
+                )));
             }
+
         } catch {
-            await restartMsg.edit({
-                embeds: [styledEmbed({ color: THEME.ROSE, description: `${IC.cross} انتهى الوقت` })],
-                components: []
-            });
+            logMsg.edit(v2Message(v2Error('انتهى الوقت'))).catch(() => { });
         }
     }
 
-    // ━━━━━━ ADMIN ━━━━━━
-    else if (command === 'admin') {
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    //  ADMIN
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    else if (cmd === 'admin') {
         if (!isOwner(message.author.id)) {
-            return message.reply({
-                embeds: [styledEmbed({
-                    color: THEME.ROSE,
-                    description: `${IC.crown} هذا الأمر خاص بالمالك فقط`
-                })]
-            });
+            return message.reply(v2Message(v2Error('هذا الأمر خاص بالمالك فقط')));
         }
 
+        const ts = uid();
         const adminMenu = new StringSelectMenuBuilder()
-            .setCustomId(`adm_menu_${Date.now()}`)
+            .setCustomId(`adm_${ts}`)
             .setPlaceholder('اختر الإعداد...')
             .addOptions([
                 { label: 'تغيير اسم البوت', value: 'name', emoji: '✏️' },
@@ -1718,180 +1567,137 @@ client.on('messageCreate', async (message) => {
                 { label: 'قائمة الأدمنز', value: 'list', emoji: '📋' }
             ]);
 
-        const adminMsg = await message.reply({
-            embeds: [styledEmbed({
-                color: THEME.GOLD,
-                title: `${IC.gear} لوحة الإعدادات`,
-                description:
-                    `مرحباً ${IC.crown} <@${message.author.id}>\n\n` +
-                    `${IC.dot} اختر الإعداد اللي تبي تعدله من القائمة`,
-                footer: 'الإعدادات تطبق على البوت بالكامل'
-            })],
-            components: [new ActionRowBuilder().addComponents(adminMenu)]
-        });
+        const adminContainer = v2Container(
+            CONFIG.THEME.GOLD,
+            v2Text(`### ⟐ لوحة الإعدادات`),
+            v2Separator(),
+            v2Text(`مرحباً ♛ <@${message.author.id}>\n\n▸ اختر الإعداد اللي تبي تعدله`),
+            v2Separator(),
+            v2Text(`-# الإعدادات تطبق على البوت بالكامل`),
+            new ActionRowBuilder().addComponents(adminMenu)
+        );
+
+        const adminMsg = await message.reply(v2Message(adminContainer));
 
         try {
             const admInt = await adminMsg.awaitMessageComponent({
-                filter: i => i.user.id === message.author.id,
+                filter: i => i.user.id === message.author.id && i.customId === `adm_${ts}`,
                 componentType: ComponentType.StringSelect,
-                time: COLLECTOR_TIMEOUT
+                time: CONFIG.COLLECTOR_TIMEOUT
             });
 
             const choice = admInt.values[0];
 
             // ── تغيير الاسم ──
             if (choice === 'name') {
-                await admInt.update({
-                    embeds: [styledEmbed({
-                        color: THEME.GOLD,
-                        description: `${IC.dot} جاري التحضير...`
-                    })],
-                    components: []
-                });
+                const modalTs = uid();
+                const modal = new ModalBuilder()
+                    .setCustomId(`adm_name_modal_${modalTs}`)
+                    .setTitle('تغيير اسم البوت');
 
-                const resp = await collectMessage(message.channel, message.author.id,
-                    `${IC.dot} اكتب الاسم الجديد للبوت:`
-                );
-                if (!resp) return;
+                modal.addComponents(new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId('new_name')
+                        .setLabel('الاسم الجديد')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                        .setMaxLength(32)
+                        .setValue(client.user.username)
+                ));
+
+                await admInt.showModal(modal);
 
                 try {
+                    const modalInt = await admInt.awaitModalSubmit({
+                        filter: i => i.customId === `adm_name_modal_${modalTs}`,
+                        time: CONFIG.COLLECTOR_TIMEOUT
+                    });
+
+                    const newName = modalInt.fields.getTextInputValue('new_name');
                     const oldName = client.user.username;
-                    await client.user.setUsername(resp.content);
 
-                    await message.channel.send({
-                        embeds: [styledEmbed({
-                            color: THEME.GLOW,
-                            description:
-                                `${IC.check} تم تغيير الاسم إلى: **${resp.content}**\n\n` +
-                                `\`${IC.user} ${message.author.tag} ${IC.dot} ${formatDate(new Date())}\``
-                        })]
-                    });
+                    try {
+                        await client.user.setUsername(newName);
+                        await modalInt.update(v2Message(v2Success(`تم تغيير الاسم إلى: **${newName}**`)));
 
-                    // لوق
-                    await sendLog(message.guild.id, buildLogEmbed(
-                        'تغيير اسم البوت',
-                        `${IC.dot} من: **${oldName}**\n${IC.dot} إلى: **${resp.content}**`,
-                        message.author.id
-                    ));
-                } catch (err) {
-                    await message.channel.send({
-                        embeds: [styledEmbed({
-                            color: THEME.ROSE,
-                            description: `${IC.cross} فشل التغيير: ${err.message}\n\n\`تغيير الاسم محدود بمرتين كل ساعة\``
-                        })]
-                    });
-                }
+                        await sendLog(message.guild.id, CONFIG.THEME.LOG_MUTED,
+                            'تغيير اسم البوت',
+                            `▸ من: **${oldName}**\n▸ إلى: **${newName}**`,
+                            message.author.id
+                        );
+                    } catch (err) {
+                        await modalInt.update(v2Message(v2Error(`فشل التغيير: ${err.message}\n-# تغيير الاسم محدود بمرتين كل ساعة`)));
+                    }
+                } catch { }
+
             }
 
             // ── تغيير الصورة ──
             else if (choice === 'avatar') {
-                await admInt.update({
-                    embeds: [styledEmbed({
-                        color: THEME.GOLD,
-                        description: `${IC.dot} جاري التحضير...`
-                    })],
-                    components: []
-                });
+                await admInt.update(v2Message(v2Container(CONFIG.THEME.GOLD, v2Text(`▸ جاري التحضير...`))));
 
-                const resp = await collectMessage(message.channel, message.author.id,
-                    `${IC.dot} أرسل الصورة الجديدة — رابط أو ارفق ملف:`
-                );
+                const resp = await collectText(message.channel, message.author.id, '▸ أرسل الصورة الجديدة — رابط أو ارفق ملف:');
                 if (!resp) return;
 
                 const url = extractImage(resp);
-                if (!url) {
-                    return message.channel.send({
-                        embeds: [styledEmbed({
-                            color: THEME.ROSE,
-                            description: `${IC.cross} ما لقيت صورة صالحة`
-                        })]
-                    });
-                }
+                if (!url) return message.channel.send(v2Message(v2Error('ما لقيت صورة صالحة')));
 
                 try {
                     await client.user.setAvatar(url);
-                    await message.channel.send({
-                        embeds: [styledEmbed({
-                            color: THEME.GLOW,
-                            description:
-                                `${IC.check} تم تغيير صورة البوت\n\n` +
-                                `\`${IC.user} ${message.author.tag} ${IC.dot} ${formatDate(new Date())}\``,
-                            thumbnail: url
-                        })]
-                    });
+                    await message.channel.send(v2Message(v2Success('تم تغيير صورة البوت')));
 
-                    await sendLog(message.guild.id, buildLogEmbed(
-                        'تغيير صورة البوت',
-                        `${IC.dot} تم تحديث الأفاتار`,
-                        message.author.id
-                    ));
+                    await sendLog(message.guild.id, CONFIG.THEME.LOG_MUTED,
+                        'تغيير صورة البوت', '▸ تم تحديث الأفاتار', message.author.id
+                    );
                 } catch (err) {
-                    await message.channel.send({
-                        embeds: [styledEmbed({
-                            color: THEME.ROSE,
-                            description: `${IC.cross} فشل التغيير: ${err.message}`
-                        })]
-                    });
+                    await message.channel.send(v2Message(v2Error(`فشل التغيير: ${err.message}`)));
                 }
             }
 
             // ── تغيير البايو ──
             else if (choice === 'bio') {
-                await admInt.update({
-                    embeds: [styledEmbed({
-                        color: THEME.GOLD,
-                        description: `${IC.dot} جاري التحضير...`
-                    })],
-                    components: []
-                });
+                const modalTs = uid();
+                const modal = new ModalBuilder()
+                    .setCustomId(`adm_bio_modal_${modalTs}`)
+                    .setTitle('تغيير بايو البوت');
 
-                const resp = await collectMessage(message.channel, message.author.id,
-                    `${IC.dot} اكتب البايو الجديد:`
-                );
-                if (!resp) return;
+                modal.addComponents(new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId('new_bio')
+                        .setLabel('البايو الجديد')
+                        .setStyle(TextInputStyle.Paragraph)
+                        .setRequired(true)
+                        .setMaxLength(190)
+                ));
+
+                await admInt.showModal(modal);
 
                 try {
-                    await client.rest.patch('/users/@me', {
-                        body: { bio: resp.content }
+                    const modalInt = await admInt.awaitModalSubmit({
+                        filter: i => i.customId === `adm_bio_modal_${modalTs}`,
+                        time: CONFIG.COLLECTOR_TIMEOUT
                     });
 
-                    await message.channel.send({
-                        embeds: [styledEmbed({
-                            color: THEME.GLOW,
-                            description:
-                                `${IC.check} تم تحديث البايو:\n\n` +
-                                `> ${resp.content}\n\n` +
-                                `\`${IC.user} ${message.author.tag} ${IC.dot} ${formatDate(new Date())}\``
-                        })]
-                    });
+                    const newBio = modalInt.fields.getTextInputValue('new_bio');
 
-                    await sendLog(message.guild.id, buildLogEmbed(
-                        'تغيير بايو البوت',
-                        `${IC.dot} البايو الجديد: ${resp.content}`,
-                        message.author.id
-                    ));
-                } catch (err) {
-                    await message.channel.send({
-                        embeds: [styledEmbed({
-                            color: THEME.ROSE,
-                            description: `${IC.cross} فشل التحديث: ${err.message}`
-                        })]
-                    });
-                }
+                    try {
+                        await client.rest.patch('/users/@me', { body: { bio: newBio } });
+                        await modalInt.update(v2Message(v2Success(`تم تحديث البايو:\n> ${newBio}`)));
+
+                        await sendLog(message.guild.id, CONFIG.THEME.LOG_MUTED,
+                            'تغيير بايو البوت', `▸ البايو: ${newBio}`, message.author.id
+                        );
+                    } catch (err) {
+                        await modalInt.update(v2Message(v2Error(`فشل التحديث: ${err.message}`)));
+                    }
+                } catch { }
             }
 
             // ── تغيير الستاتس ──
             else if (choice === 'status') {
-                await admInt.update({
-                    embeds: [styledEmbed({
-                        color: THEME.GOLD,
-                        description: `${IC.dot} جاري التحضير...`
-                    })],
-                    components: []
-                });
-
+                const ts_act = uid();
                 const actMenu = new StringSelectMenuBuilder()
-                    .setCustomId(`act_type_${Date.now()}`)
+                    .setCustomId(`act_${ts_act}`)
                     .setPlaceholder('نوع الأكتيفيتي...')
                     .addOptions([
                         { label: 'Playing', value: 'playing', emoji: '🎮' },
@@ -1901,38 +1707,49 @@ client.on('messageCreate', async (message) => {
                         { label: 'Custom', value: 'custom', emoji: '💫' }
                     ]);
 
-                const actMsg = await message.channel.send({
-                    embeds: [styledEmbed({
-                        color: THEME.GOLD,
-                        description: `${IC.dot} اختر نوع الأكتيفيتي:`
-                    })],
-                    components: [new ActionRowBuilder().addComponents(actMenu)]
-                });
+                await admInt.update(v2Message(v2Container(
+                    CONFIG.THEME.GOLD,
+                    v2Text(`▸ اختر نوع الأكتيفيتي:`),
+                    new ActionRowBuilder().addComponents(actMenu)
+                )));
 
                 try {
-                    const actInt = await actMsg.awaitMessageComponent({
-                        filter: i => i.user.id === message.author.id,
+                    const actInt = await message.channel.awaitMessageComponent({
+                        filter: i => i.user.id === message.author.id && i.customId === `act_${ts_act}`,
                         componentType: ComponentType.StringSelect,
-                        time: COLLECTOR_TIMEOUT
+                        time: CONFIG.COLLECTOR_TIMEOUT
                     });
 
                     const actType = actInt.values[0];
 
-                    await actInt.update({
-                        embeds: [styledEmbed({
-                            color: THEME.MAIN,
-                            description: `${IC.check} النوع: **${actType}**`
-                        })],
-                        components: []
+                    // Modal للنص
+                    const modalTs = uid();
+                    const modal = new ModalBuilder()
+                        .setCustomId(`status_modal_${modalTs}`)
+                        .setTitle('نص الأكتيفيتي');
+
+                    modal.addComponents(new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId('status_text')
+                            .setLabel('النص')
+                            .setStyle(TextInputStyle.Short)
+                            .setRequired(true)
+                            .setMaxLength(128)
+                    ));
+
+                    await actInt.showModal(modal);
+
+                    const modalInt = await actInt.awaitModalSubmit({
+                        filter: i => i.customId === `status_modal_${modalTs}`,
+                        time: CONFIG.COLLECTOR_TIMEOUT
                     });
 
-                    const textResp = await collectMessage(message.channel, message.author.id,
-                        `${IC.dot} اكتب نص الأكتيفيتي:`
-                    );
-                    if (!textResp) return;
+                    const statusText = modalInt.fields.getTextInputValue('status_text');
 
+                    // اختيار الحالة
+                    const ts_st = uid();
                     const stMenu = new StringSelectMenuBuilder()
-                        .setCustomId(`st_type_${Date.now()}`)
+                        .setCustomId(`st_${ts_st}`)
                         .setPlaceholder('الحالة...')
                         .addOptions([
                             { label: 'Online', value: 'online', emoji: '🟢' },
@@ -1941,18 +1758,16 @@ client.on('messageCreate', async (message) => {
                             { label: 'Invisible', value: 'invisible', emoji: '⚫' }
                         ]);
 
-                    const stMsg = await message.channel.send({
-                        embeds: [styledEmbed({
-                            color: THEME.GOLD,
-                            description: `${IC.dot} اختر الحالة:`
-                        })],
-                        components: [new ActionRowBuilder().addComponents(stMenu)]
-                    });
+                    await modalInt.update(v2Message(v2Container(
+                        CONFIG.THEME.GOLD,
+                        v2Text(`✓ النوع: **${actType}** • النص: **${statusText}**\n\n▸ اختر الحالة:`),
+                        new ActionRowBuilder().addComponents(stMenu)
+                    )));
 
-                    const stInt = await stMsg.awaitMessageComponent({
-                        filter: i => i.user.id === message.author.id,
+                    const stInt = await message.channel.awaitMessageComponent({
+                        filter: i => i.user.id === message.author.id && i.customId === `st_${ts_st}`,
                         componentType: ComponentType.StringSelect,
-                        time: COLLECTOR_TIMEOUT
+                        time: CONFIG.COLLECTOR_TIMEOUT
                     });
 
                     const statusType = stInt.values[0];
@@ -1966,303 +1781,307 @@ client.on('messageCreate', async (message) => {
                     };
 
                     client.user.setPresence({
-                        activities: [{ name: textResp.content, type: typeMap[actType] }],
+                        activities: [{ name: statusText, type: typeMap[actType] }],
                         status: statusType
                     });
 
-                    await stInt.update({
-                        embeds: [styledEmbed({
-                            color: THEME.GLOW,
-                            description:
-                                `${IC.check} تم تحديث الستاتس\n\n` +
-                                `${IC.dot} النوع: **${actType}**\n` +
-                                `${IC.dot} النص: **${textResp.content}**\n` +
-                                `${IC.dot} الحالة: **${statusType}**\n\n` +
-                                `\`${IC.user} ${message.author.tag} ${IC.dot} ${formatDate(new Date())}\``
-                        })],
-                        components: []
-                    });
+                    await stInt.update(v2Message(v2Success(
+                        `تم تحديث الستاتس\n\n` +
+                        `▸ النوع: **${actType}**\n` +
+                        `▸ النص: **${statusText}**\n` +
+                        `▸ الحالة: **${statusType}**`
+                    )));
 
-                    await sendLog(message.guild.id, buildLogEmbed(
+                    await sendLog(message.guild.id, CONFIG.THEME.LOG_MUTED,
                         'تغيير ستاتس البوت',
-                        `${IC.dot} النوع: **${actType}**\n${IC.dot} النص: **${textResp.content}**\n${IC.dot} الحالة: **${statusType}**`,
+                        `▸ النوع: **${actType}**\n▸ النص: **${statusText}**\n▸ الحالة: **${statusType}**`,
                         message.author.id
-                    ));
+                    );
 
-                } catch {
-                    try { await actMsg.edit({ components: [] }); } catch { }
-                }
+                } catch { }
             }
 
             // ── إضافة Admin ──
             else if (choice === 'add') {
-                await admInt.update({
-                    embeds: [styledEmbed({
-                        color: THEME.GOLD,
-                        description: `${IC.dot} جاري التحضير...`
-                    })],
-                    components: []
-                });
+                await admInt.update(v2Message(v2Container(CONFIG.THEME.GOLD, v2Text(`▸ جاري التحضير...`))));
 
-                const resp = await collectMessage(message.channel, message.author.id,
-                    `${IC.dot} اكتب آيدي المستخدم أو سوله منشن:`
-                );
+                const resp = await collectText(message.channel, message.author.id, '▸ اكتب آيدي المستخدم أو سوله منشن:');
                 if (!resp) return;
 
                 let targetId = resp.content.replace(/[<@!>]/g, '').trim();
 
                 if (!/^\d{17,19}$/.test(targetId)) {
-                    return message.channel.send({
-                        embeds: [styledEmbed({
-                            color: THEME.ROSE,
-                            description: `${IC.cross} آيدي غير صالح`
-                        })]
-                    });
+                    return message.channel.send(v2Message(v2Error('آيدي غير صالح')));
                 }
 
                 try {
                     const user = await client.users.fetch(targetId);
-                    if (user.bot) {
-                        return message.channel.send({
-                            embeds: [styledEmbed({
-                                color: THEME.ROSE,
-                                description: `${IC.cross} ما ينفع تضيف بوت كأدمن`
-                            })]
-                        });
-                    }
+                    if (user.bot) return message.channel.send(v2Message(v2Error('ما ينفع تضيف بوت كأدمن')));
                 } catch {
-                    return message.channel.send({
-                        embeds: [styledEmbed({
-                            color: THEME.ROSE,
-                            description: `${IC.cross} ما لقيت هالمستخدم`
-                        })]
-                    });
+                    return message.channel.send(v2Message(v2Error('ما لقيت هالمستخدم')));
                 }
 
-                const guildData = getGuildData(message.guild.id);
-
-                if (guildData.admins.includes(targetId)) {
-                    return message.channel.send({
-                        embeds: [styledEmbed({
-                            color: THEME.WARM,
-                            description: `${IC.dot} هالمستخدم أدمن بالفعل`
-                        })]
-                    });
+                const gd = getGuild(message.guild.id);
+                if (gd.admins.includes(targetId)) {
+                    return message.channel.send(v2Message(v2Container(CONFIG.THEME.WARNING, v2Text(`▸ هالمستخدم أدمن بالفعل`))));
                 }
 
-                guildData.admins.push(targetId);
-                updateGuildData(message.guild.id, guildData);
+                gd.admins.push(targetId);
+                saveGuild(message.guild.id, gd);
 
-                await message.channel.send({
-                    embeds: [styledEmbed({
-                        color: THEME.GLOW,
-                        description:
-                            `${IC.check} تم إضافة <@${targetId}> كأدمن\n\n` +
-                            `\`${IC.user} ${message.author.tag} ${IC.dot} ${formatDate(new Date())}\``
-                    })]
-                });
+                await message.channel.send(v2Message(v2Success(`تم إضافة <@${targetId}> كأدمن`)));
 
-                await sendLog(message.guild.id, buildLogEmbed(
+                await sendLog(message.guild.id, CONFIG.THEME.LOG_MUTED,
                     'إضافة أدمن جديد',
-                    `${IC.dot} المستخدم: <@${targetId}> \`${targetId}\``,
+                    `▸ المستخدم: <@${targetId}> \`${targetId}\``,
                     message.author.id
-                ));
+                );
             }
 
             // ── حذف Admin ──
             else if (choice === 'remove') {
-                const guildData = getGuildData(message.guild.id);
+                const gd = getGuild(message.guild.id);
 
-                if (guildData.admins.length === 0) {
-                    return admInt.update({
-                        embeds: [styledEmbed({
-                            color: THEME.MAIN,
-                            description: `${IC.ring} ما في أدمنز حالياً`
-                        })],
-                        components: []
-                    });
+                if (gd.admins.length === 0) {
+                    return admInt.update(v2Message(v2Container(CONFIG.THEME.MUTED, v2Text(`○ ما في أدمنز حالياً`))));
                 }
 
-                await admInt.update({
-                    embeds: [styledEmbed({
-                        color: THEME.GOLD,
-                        description: `${IC.dot} جاري التحضير...`
-                    })],
-                    components: []
-                });
+                await admInt.update(v2Message(v2Container(CONFIG.THEME.GOLD, v2Text(`▸ جاري التحضير...`))));
 
-                const resp = await collectMessage(message.channel, message.author.id,
-                    `${IC.dot} اكتب آيدي الأدمن اللي تبي تحذفه أو سوله منشن:`
-                );
+                const resp = await collectText(message.channel, message.author.id, '▸ اكتب آيدي الأدمن اللي تبي تحذفه أو سوله منشن:');
                 if (!resp) return;
 
                 let removeId = resp.content.replace(/[<@!>]/g, '').trim();
 
-                if (!guildData.admins.includes(removeId)) {
-                    return message.channel.send({
-                        embeds: [styledEmbed({
-                            color: THEME.ROSE,
-                            description: `${IC.cross} هالمستخدم مو أدمن`
-                        })]
-                    });
+                if (!gd.admins.includes(removeId)) {
+                    return message.channel.send(v2Message(v2Error('هالمستخدم مو أدمن')));
                 }
 
-                guildData.admins = guildData.admins.filter(id => id !== removeId);
-                updateGuildData(message.guild.id, guildData);
+                gd.admins = gd.admins.filter(id => id !== removeId);
+                saveGuild(message.guild.id, gd);
 
-                await message.channel.send({
-                    embeds: [styledEmbed({
-                        color: THEME.GLOW,
-                        description:
-                            `${IC.check} تم حذف <@${removeId}> من الأدمنز\n\n` +
-                            `\`${IC.user} ${message.author.tag} ${IC.dot} ${formatDate(new Date())}\``
-                    })]
-                });
+                await message.channel.send(v2Message(v2Success(`تم حذف <@${removeId}> من الأدمنز`)));
 
-                await sendLog(message.guild.id, buildLogEmbed(
+                await sendLog(message.guild.id, CONFIG.THEME.LOG_MUTED,
                     'حذف أدمن',
-                    `${IC.dot} المستخدم: <@${removeId}> \`${removeId}\``,
+                    `▸ المستخدم: <@${removeId}> \`${removeId}\``,
                     message.author.id
-                ));
+                );
             }
 
             // ── قائمة الأدمنز ──
             else if (choice === 'list') {
-                const guildData = getGuildData(message.guild.id);
-                const admins = guildData.admins;
+                const gd = getGuild(message.guild.id);
+                const admins = gd.admins;
 
-                let list = '';
+                const components = [
+                    v2Text(`### ⊡ قائمة الأدمنز`),
+                    v2Separator(),
+                    v2Text(`♛ **المالك:**\n╰ <@${CONFIG.OWNER_ID}> \`${CONFIG.OWNER_ID}\``),
+                    v2Separator()
+                ];
+
                 if (admins.length === 0) {
-                    list = `${IC.ring} ما في أدمنز مضافين`;
+                    components.push(v2Text(`○ ما في أدمنز مضافين`));
                 } else {
-                    admins.forEach((id, i) => {
-                        list += `${IC.dot} **${i + 1}.** <@${id}> \`${id}\`\n`;
-                    });
+                    components.push(v2Text(`⊡ **الأدمنز (${admins.length}):**`));
+                    for (const id of admins) {
+                        components.push(v2SectionButton(
+                            `<@${id}>\n-# \`${id}\``,
+                            new ButtonBuilder().setCustomId(`al_${id}`).setLabel('⊡').setStyle(ButtonStyle.Secondary).setDisabled(true)
+                        ));
+                    }
                 }
 
-                await admInt.update({
-                    embeds: [styledEmbed({
-                        color: THEME.GOLD,
-                        title: `${IC.shield} قائمة الأدمنز`,
-                        description:
-                            `${divider()}\n\n` +
-                            `${IC.crown} **المالك:**\n` +
-                            `${IC.corner} <@${OWNER_ID}> \`${OWNER_ID}\`\n\n` +
-                            `${IC.shield} **الأدمنز (${admins.length}):**\n` +
-                            `${list}\n\n` +
-                            `${divider()}`,
-                        footer: message.guild.name
-                    })],
-                    components: []
-                });
+                components.push(v2Separator(), v2Text(`-# ${message.guild.name}`));
+
+                await admInt.update(v2Message(v2Container(CONFIG.THEME.GOLD, ...components)));
             }
 
         } catch {
-            try {
-                await adminMsg.edit({
-                    embeds: [styledEmbed({ color: THEME.ROSE, description: `${IC.cross} انتهى الوقت` })],
-                    components: []
-                });
-            } catch { }
+            adminMsg.edit(v2Message(v2Error('انتهى الوقت'))).catch(() => { });
         }
     }
 
-    // ━━━━━━ OWNER ━━━━━━
-    else if (command === 'owner') {
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    //  OWNER
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    else if (cmd === 'owner') {
         if (!isOwner(message.author.id)) {
-            return message.reply({
-                embeds: [styledEmbed({
-                    color: THEME.ROSE,
-                    description: `${IC.crown} هذا الأمر خاص بالمالك فقط`
-                })]
-            });
+            return message.reply(v2Message(v2Error('هذا الأمر خاص بالمالك فقط')));
         }
 
         const guilds = client.guilds.cache;
         const data = loadData();
 
-        let totalBroadcasts = 0;
-        let totalMembers = 0;
-        let guildsList = '';
+        let totalBc = 0, totalMem = 0;
 
-        guilds.forEach(guild => {
-            const gd = data[guild.id];
+        const components = [
+            v2Text(`### ♛ لوحة تحكم المالك`),
+            v2Separator(),
+
+            v2Section(
+                `**${client.user.username}**\n-# بوت البرودكاست`,
+                client.user.displayAvatarURL({ dynamic: true, size: 64 })
+            ),
+
+            v2Separator(SeparatorSpacingSize.Large)
+        ];
+
+        // إحصائيات عامة
+        guilds.forEach(g => {
+            const gd = data[g.id];
+            totalBc += gd?.stats?.totalBroadcasts || 0;
+            totalMem += g.memberCount;
+        });
+
+        components.push(
+            v2Text(
+                `◆ السيرفرات: **${guilds.size}**\n` +
+                `◉ الأعضاء: **${totalMem}**\n` +
+                `⊳ البرودكاست: **${totalBc}**\n` +
+                `✦ البينق: **${client.ws.ping}ms**\n` +
+                `◷ التشغيل: **${formatUptime(client.uptime)}**`
+            ),
+            v2Separator(SeparatorSpacingSize.Large),
+            v2Text(`\` السيرفرات \``),
+            v2Separator()
+        );
+
+        // كل سيرفر
+        guilds.forEach(g => {
+            const gd = data[g.id];
             const bc = gd?.stats?.totalBroadcasts || 0;
-            totalBroadcasts += bc;
-            totalMembers += guild.memberCount;
+            const adms = gd?.admins?.length || 0;
+            const logSt = gd?.logChannelId ? `<#${gd.logChannelId}>` : '`معطل`';
 
-            guildsList +=
-                `**${IC.dot} ${guild.name}**\n` +
-                `${IC.bar}  الأعضاء: **${guild.memberCount}**\n` +
-                `${IC.bar}  البرودكاست: **${bc}**\n` +
-                `${IC.bar}  الأدمنز: **${gd?.admins?.length || 0}**\n` +
-                `${IC.corner}  اللوق: ${gd?.logChannelId ? `<#${gd.logChannelId}>` : '`معطل`'}\n\n`;
+            components.push(
+                v2Section(
+                    `**${g.name}**\n-# 👥 ${g.memberCount} • 📤 ${bc} • 🛡️ ${adms} • 📋 ${logSt}`,
+                    g.iconURL({ dynamic: true, size: 64 }) || undefined
+                )
+            );
         });
 
-        if (!guildsList) guildsList = `${IC.ring} ما في سيرفرات`;
+        components.push(
+            v2Separator(),
+            v2Text(`-# ${message.author.tag} • ${formatDate(new Date())}`)
+        );
 
-        const ownerEmbed = styledEmbed({
-            color: THEME.GOLD,
-            title: `${IC.crown} لوحة تحكم المالك`,
-            thumbnail: client.user.displayAvatarURL({ dynamic: true }),
-            description:
-                `${divider()}\n` +
-                `\` الإحصائيات العامة \`\n` +
-                `${divider()}\n\n` +
+        const container = v2Container(CONFIG.THEME.GOLD, ...components);
+        await message.reply(v2Message(container));
+    }
 
-                `${IC.pulse}  السيرفرات: **${guilds.size}**\n` +
-                `${IC.user}  الأعضاء: **${totalMembers}**\n` +
-                `${IC.send}  البرودكاست: **${totalBroadcasts}**\n` +
-                `${IC.star}  البينق: **${client.ws.ping}ms**\n` +
-                `${IC.clock}  التشغيل: **${formatUptime(client.uptime)}**\n\n` +
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    //  RESTART
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-                `${divider()}\n` +
-                `\` السيرفرات \`\n` +
-                `${divider()}\n\n` +
+    else if (cmd === 'restart') {
+        if (!isOwner(message.author.id)) {
+            return message.reply(v2Message(v2Error('هذا الأمر خاص بالمالك فقط')));
+        }
 
-                guildsList +
+        const ts = uid();
 
-                divider(),
+        const confirmBtn = new ButtonBuilder()
+            .setCustomId(`rst_yes_${ts}`)
+            .setLabel('أعد التشغيل')
+            .setStyle(ButtonStyle.Danger);
 
-            footer: `${message.author.tag} ${IC.dot} ${formatDate(new Date())}`
-        });
+        const cancelBtn = new ButtonBuilder()
+            .setCustomId(`rst_no_${ts}`)
+            .setLabel('إلغاء')
+            .setStyle(ButtonStyle.Secondary);
 
-        await message.reply({ embeds: [ownerEmbed] });
+        const container = v2Container(
+            CONFIG.THEME.DANGER,
+            v2Text(`### ⟳ إعادة تشغيل`),
+            v2Separator(),
+            v2Text(
+                `▸ متأكد تبي تسوي ريستارت؟\n\n` +
+                `│ البوت بيطفى ويرجع يشتغل\n` +
+                `│ الجدولات المحفوظة ما بتتأثر\n` +
+                `╰ وقت التشغيل: **${formatUptime(client.uptime)}**`
+            ),
+            v2Separator(),
+            v2Text(`-# البوت بيرجع تلقائي لو على Railway أو PM2`),
+            new ActionRowBuilder().addComponents(confirmBtn, cancelBtn)
+        );
+
+        const rstMsg = await message.reply(v2Message(container));
+
+        try {
+            const int = await rstMsg.awaitMessageComponent({
+                filter: i => i.user.id === message.author.id,
+                componentType: ComponentType.Button,
+                time: 30000
+            });
+
+            if (int.customId === `rst_yes_${ts}`) {
+                await int.update(v2Message(v2Container(
+                    CONFIG.THEME.SUCCESS,
+                    v2Text(`### ⟳ جاري إعادة التشغيل...`),
+                    v2Separator(),
+                    v2Text(`▸ البوت بيرجع خلال ثواني`)
+                )));
+
+                await sendLog(message.guild.id, CONFIG.THEME.LOG_ERROR,
+                    'إعادة تشغيل البوت',
+                    '▸ تم طلب ريستارت',
+                    message.author.id
+                );
+
+                await sleep(1500);
+                process.exit(0);
+
+            } else {
+                await int.update(v2Message(v2Container(CONFIG.THEME.MUTED, v2Text(`▸ تم إلغاء إعادة التشغيل`))));
+            }
+        } catch {
+            rstMsg.edit(v2Message(v2Error('انتهى الوقت'))).catch(() => { });
+        }
     }
 });
 
-// ═══════════════════════════════════════
-//  معالجة الأخطاء
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  معالجة الأخطاء العامة
+// ═══════════════════════════════════════════════════════════════
 
 process.on('unhandledRejection', (err) => {
-    console.error('[ERROR] Unhandled:', err.message || err);
+    console.error('[ERROR] Unhandled Rejection:', err?.message || err);
 });
 
 process.on('uncaughtException', (err) => {
-    console.error('[ERROR] Uncaught:', err.message || err);
+    console.error('[ERROR] Uncaught Exception:', err?.message || err);
 });
 
 client.on('error', (err) => {
     console.error('[CLIENT] Error:', err.message);
 });
 
-client.on('shardReconnecting', () => console.log('[SHARD] Reconnecting...'));
-client.on('shardResume', () => console.log('[SHARD] Resumed'));
+client.on('shardReconnecting', () => {
+    console.log('[SHARD] Reconnecting...');
+});
 
-// ═══════════════════════════════════════
+client.on('shardResume', () => {
+    console.log('[SHARD] Resumed');
+});
+
+// ═══════════════════════════════════════════════════════════════
 //  تشغيل البوت
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 
-client.login(TOKEN).catch(err => {
+client.login(CONFIG.TOKEN).catch(err => {
     console.error('[LOGIN] Failed:', err.message);
     process.exit(1);
 });
 
-// ═══════════════════════════════════════════════════════
-//  متغيرات البيئة المطلوبة في Railway:
-//
-//  TOKEN     ← توكن البوت من Discord Developer Portal
-//  OWNER_ID  ← الآيدي الخاص فيك من ديسكورد
-//  CLIENT_ID ← آيدي البوت من Discord Developer Portal
-// ═══════════════════════════════════════════════════════
+/*
+  ═══════════════════════════════════
+  متغيرات البيئة المطلوبة في Railway:
+  ═══════════════════════════════════
+  TOKEN     ← توكن البوت من Discord Developer Portal
+  OWNER_ID  ← الآيدي الخاص فيك من ديسكورد
+  ═══════════════════════════════════
+*/
