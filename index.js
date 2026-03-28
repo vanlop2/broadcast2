@@ -42,15 +42,11 @@ const CONFIG = {
         INFO: 0x5865F2,
         GOLD: 0xF0B232
     },
-    SCHEDULE_OPTIONS: [
-        { label: '⚡ الحين', value: 'now' },
-        { label: '⏱️ بعد 30 دقيقة', value: '30m', ms: 30 * 60 * 1000 },
-        { label: '🕐 بعد ساعة', value: '1h', ms: 60 * 60 * 1000 },
-        { label: '🕒 بعد 3 ساعات', value: '3h', ms: 3 * 60 * 60 * 1000 },
-        { label: '🕕 بعد 6 ساعات', value: '6h', ms: 6 * 60 * 60 * 1000 },
-        { label: '🕛 بعد 12 ساعة', value: '12h', ms: 12 * 60 * 60 * 1000 },
-        { label: '📅 بعد 24 ساعة', value: '24h', ms: 24 * 60 * 60 * 1000 },
-        { label: '🗓️ وقت مخصص', value: 'custom' }
+    // ── قائمة الأوامر الأصلية — تُستخدم في addcmd والتحقق ──
+    ORIGINAL_COMMANDS: [
+        'broadcast', 'scheduled', 'resend', 'stats',
+        'help', 'admin', 'setlog', 'owner', 'restart',
+        'addemoji', 'addcmd'
     ]
 };
 
@@ -103,8 +99,14 @@ function getGuild(guildId) {
             scheduledMessages: [],
             lastBroadcast: null,
             logChannelId: null,
+            aliases: {},
             stats: { totalBroadcasts: 0, totalDelivered: 0, totalFailed: 0, totalBlocked: 0 }
         };
+        saveData(data);
+    }
+    // ضمان وجود حقل aliases للبيانات القديمة
+    if (!data[guildId].aliases) {
+        data[guildId].aliases = {};
         saveData(data);
     }
     return data[guildId];
@@ -180,16 +182,11 @@ function extractImage(msg) {
 //  بناء الـ Embeds — القالب الموحد
 // ═══════════════════════════════════════════════════════
 
-/**
- * إنشاء embed بالقالب الموحد
- * كل embed يستخدم setAuthor بدل setTitle
- */
 function makeEmbed(guild, options = {}) {
     const embed = new EmbedBuilder()
         .setColor(options.color || CONFIG.COLORS.PRIMARY)
         .setTimestamp();
 
-    // العنوان دائماً في setAuthor
     if (options.author) {
         embed.setAuthor({
             name: options.author,
@@ -198,14 +195,10 @@ function makeEmbed(guild, options = {}) {
     }
 
     if (options.description) embed.setDescription(options.description);
-
     if (options.fields) embed.addFields(options.fields);
-
     if (options.thumbnail) embed.setThumbnail(options.thumbnail);
-
     if (options.image) embed.setImage(options.image);
 
-    // الفوتر الموحد
     if (guild) {
         embed.setFooter({
             text: `${client.user.username} • ${guild.name}`,
@@ -218,30 +211,16 @@ function makeEmbed(guild, options = {}) {
     return embed;
 }
 
-// ── Embeds سريعة ──
-
 function errorEmbed(guild, text) {
-    return makeEmbed(guild, {
-        author: '✗ خطأ',
-        color: CONFIG.COLORS.ERROR,
-        description: text
-    });
+    return makeEmbed(guild, { author: '✗ خطأ', color: CONFIG.COLORS.ERROR, description: text });
 }
 
 function successEmbed(guild, text) {
-    return makeEmbed(guild, {
-        author: '✓ تم',
-        color: CONFIG.COLORS.SUCCESS,
-        description: text
-    });
+    return makeEmbed(guild, { author: '✓ تم', color: CONFIG.COLORS.SUCCESS, description: text });
 }
 
 function infoEmbed(guild, title, text) {
-    return makeEmbed(guild, {
-        author: title,
-        color: CONFIG.COLORS.INFO,
-        description: text
-    });
+    return makeEmbed(guild, { author: title, color: CONFIG.COLORS.INFO, description: text });
 }
 
 // ═══════════════════════════════════════════════════════
@@ -320,11 +299,9 @@ function buildDmPayload(content) {
 // ═══════════════════════════════════════════════════════
 
 async function executeBroadcast(guild, channel, broadcastContent, maxMembers = 0) {
-    // جلب الأعضاء
     await guild.members.fetch();
     let members = guild.members.cache.filter(m => !m.user.bot).map(m => m);
 
-    // لو تجربة — اختيار عشوائي
     if (maxMembers > 0 && maxMembers < members.length) {
         members = members.sort(() => Math.random() - 0.5).slice(0, maxMembers);
     }
@@ -332,7 +309,6 @@ async function executeBroadcast(guild, channel, broadcastContent, maxMembers = 0
     const total = members.length;
     let delivered = 0, failed = 0, blocked = 0;
 
-    // رسالة التقدم — عامة (الكل يشوفها)
     const progressEmbed = makeEmbed(guild, {
         author: '📤 جاري الإرسال...',
         color: CONFIG.COLORS.INFO,
@@ -362,7 +338,6 @@ async function executeBroadcast(guild, channel, broadcastContent, maxMembers = 0
 
         counter++;
 
-        // تحديث كل 8 أعضاء أو عند النهاية
         if (counter >= 8 || i === members.length - 1) {
             counter = 0;
             const pct = Math.round(((i + 1) / total) * 100);
@@ -387,7 +362,6 @@ async function executeBroadcast(guild, channel, broadcastContent, maxMembers = 0
         if (i < members.length - 1) await sleep(CONFIG.DM_DELAY);
     }
 
-    // التقرير النهائي
     const rate = total > 0 ? Math.round((delivered / total) * 100) : 0;
 
     const reportEmbed = makeEmbed(guild, {
@@ -410,7 +384,6 @@ async function executeBroadcast(guild, channel, broadcastContent, maxMembers = 0
         await channel.send({ embeds: [reportEmbed] });
     }
 
-    // تحديث الإحصائيات
     const gd = getGuild(guild.id);
     gd.stats.totalBroadcasts++;
     gd.stats.totalDelivered += delivered;
@@ -423,7 +396,6 @@ async function executeBroadcast(guild, channel, broadcastContent, maxMembers = 0
     };
     saveGuild(guild.id, gd);
 
-    // لوق
     await sendLog(guild.id, CONFIG.COLORS.SUCCESS,
         maxMembers > 0 ? 'برودكاست تجريبي' : 'برودكاست تم إرساله',
         `🟢 وصل: **${delivered}** | 🔴 فشل: **${failed}** | ⛔ مقفول: **${blocked}** | 📊 النسبة: **${rate}%**`,
@@ -434,7 +406,7 @@ async function executeBroadcast(guild, channel, broadcastContent, maxMembers = 0
 }
 
 // ═══════════════════════════════════════════════════════
-//  Flow البرودكاست التفاعلي
+//  Flow البرودكاست التفاعلي — مع تحسين الجدولة
 // ═══════════════════════════════════════════════════════
 
 async function broadcastFlow(message, isTest = false) {
@@ -483,10 +455,7 @@ async function broadcastFlow(message, isTest = false) {
             components: []
         });
     } catch {
-        return step1Msg.edit({
-            embeds: [errorEmbed(guild, 'انتهى الوقت')],
-            components: []
-        }).catch(() => { });
+        return step1Msg.edit({ embeds: [errorEmbed(guild, 'انتهى الوقت')], components: [] }).catch(() => { });
     }
 
     // ═══ الخطوة 2: شكل الرسالة ═══
@@ -526,10 +495,7 @@ async function broadcastFlow(message, isTest = false) {
             components: []
         });
     } catch {
-        return step2Msg.edit({
-            embeds: [errorEmbed(guild, 'انتهى الوقت')],
-            components: []
-        }).catch(() => { });
+        return step2Msg.edit({ embeds: [errorEmbed(guild, 'انتهى الوقت')], components: [] }).catch(() => { });
     }
 
     // ═══ الخطوة 3: جمع المحتوى ═══
@@ -537,7 +503,6 @@ async function broadcastFlow(message, isTest = false) {
 
     if (contentType === 'text_only' || contentType === 'text_and_image') {
         if (useEmbed) {
-            // ── Modal لمحتوى الـ Embed ──
             const ts3 = uid();
             const triggerBtn = new ButtonBuilder()
                 .setCustomId(`bc_modal_${ts3}`)
@@ -569,20 +534,10 @@ async function broadcastFlow(message, isTest = false) {
 
                 modal.addComponents(
                     new ActionRowBuilder().addComponents(
-                        new TextInputBuilder()
-                            .setCustomId('embed_title')
-                            .setLabel('العنوان')
-                            .setStyle(TextInputStyle.Short)
-                            .setRequired(true)
-                            .setMaxLength(256)
+                        new TextInputBuilder().setCustomId('embed_title').setLabel('العنوان').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(256)
                     ),
                     new ActionRowBuilder().addComponents(
-                        new TextInputBuilder()
-                            .setCustomId('embed_desc')
-                            .setLabel('المحتوى')
-                            .setStyle(TextInputStyle.Paragraph)
-                            .setRequired(true)
-                            .setMaxLength(4000)
+                        new TextInputBuilder().setCustomId('embed_desc').setLabel('المحتوى').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(4000)
                     )
                 );
 
@@ -609,7 +564,6 @@ async function broadcastFlow(message, isTest = false) {
                     components: []
                 });
 
-                // لو فيه صورة مطلوبة
                 if (contentType === 'text_and_image') {
                     const imgResp = await collectText(channel, userId, '🖼️ أرسل **الصورة** — رابط أو ارفق ملف:', guild);
                     if (!imgResp) return;
@@ -626,7 +580,6 @@ async function broadcastFlow(message, isTest = false) {
             }
 
         } else {
-            // ── رسالة عادية ──
             const textResp = await collectText(channel, userId, '📝 اكتب **نص الرسالة**:', guild);
             if (!textResp) return;
             broadcastContent.text = textResp.content;
@@ -640,7 +593,6 @@ async function broadcastFlow(message, isTest = false) {
         }
     } else if (contentType === 'image_only') {
         if (useEmbed) {
-            // ── Embed بصورة فقط — Modal اختياري للعنوان ──
             const ts3i = uid();
             const modalBtn = new ButtonBuilder().setCustomId(`bc_img_modal_${ts3i}`).setLabel('✏️ إضافة عنوان').setStyle(ButtonStyle.Primary);
             const skipBtn = new ButtonBuilder().setCustomId(`bc_img_skip_${ts3i}`).setLabel('تخطي العنوان').setStyle(ButtonStyle.Secondary);
@@ -672,12 +624,7 @@ async function broadcastFlow(message, isTest = false) {
                         .setTitle('عنوان الـ Embed');
 
                     modal.addComponents(new ActionRowBuilder().addComponents(
-                        new TextInputBuilder()
-                            .setCustomId('img_title')
-                            .setLabel('العنوان')
-                            .setStyle(TextInputStyle.Short)
-                            .setRequired(true)
-                            .setMaxLength(256)
+                        new TextInputBuilder().setCustomId('img_title').setLabel('العنوان').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(256)
                     ));
 
                     await trigInt.showModal(modal);
@@ -702,7 +649,6 @@ async function broadcastFlow(message, isTest = false) {
                 return triggerMsg.edit({ embeds: [errorEmbed(guild, 'انتهى الوقت')], components: [] }).catch(() => { });
             }
 
-            // طلب الصورة
             const imgResp = await collectText(channel, userId, '🖼️ أرسل **الصورة** — رابط أو ارفق ملف:', guild);
             if (!imgResp) return;
             const imgUrl = extractImage(imgResp);
@@ -713,7 +659,6 @@ async function broadcastFlow(message, isTest = false) {
             broadcastContent.embed = bEmbed.toJSON();
 
         } else {
-            // ── صورة عادية ──
             const imgResp = await collectText(channel, userId, '🖼️ أرسل **الصورة** — رابط أو ارفق ملف:', guild);
             if (!imgResp) return;
             const imgUrl = extractImage(imgResp);
@@ -721,21 +666,24 @@ async function broadcastFlow(message, isTest = false) {
         }
     }
 
-    // ═══ الخطوة 4: وقت الإرسال ═══
+    // ═══════════════════════════════════════════════════
+    //  الخطوة 4: وقت الإرسال — النظام المحسّن
+    //  خيارين: الحين أو تاريخ محدد (خطوة بخطوة)
+    // ═══════════════════════════════════════════════════
     const ts4 = uid();
     const schedMenu = new StringSelectMenuBuilder()
         .setCustomId(`bc_sched_${ts4}`)
         .setPlaceholder('متى تبي ترسل؟')
-        .addOptions(CONFIG.SCHEDULE_OPTIONS.map(o => ({
-            label: o.label,
-            value: o.value
-        })));
+        .addOptions([
+            { label: 'الحين', description: 'إرسال فوري', value: 'now', emoji: '⚡' },
+            { label: 'تاريخ محدد', description: 'حدد اليوم والساعة والدقيقة', value: 'schedule', emoji: '📅' }
+        ]);
 
     const step4Embed = makeEmbed(guild, {
         author: '⏰ وقت الإرسال',
         color: CONFIG.COLORS.INFO,
-        description: 'متى تبي ترسل البرودكاست؟\nكل الأوقات بتوقيت الرياض',
-        footer: 'الخطوة 4 من 5'
+        description: 'متى تبي ترسل البرودكاست؟',
+        footer: 'الخطوة 4 من 5 • التوقيت: الرياض'
     });
 
     const step4Msg = await channel.send({
@@ -754,7 +702,6 @@ async function broadcastFlow(message, isTest = false) {
         });
 
         const choice = schedInt.values[0];
-        const option = CONFIG.SCHEDULE_OPTIONS.find(o => o.value === choice);
 
         if (choice === 'now') {
             sendNow = true;
@@ -763,44 +710,81 @@ async function broadcastFlow(message, isTest = false) {
                 components: []
             });
 
-        } else if (choice === 'custom') {
+        } else {
+            // ── جدولة خطوة بخطوة ──
             await schedInt.update({
-                embeds: [makeEmbed(guild, { author: '✓ وقت مخصص', color: CONFIG.COLORS.PRIMARY })],
+                embeds: [makeEmbed(guild, { author: '📅 تحديد الموعد', color: CONFIG.COLORS.INFO, description: 'بنسألك 3 أسئلة بسيطة...' })],
                 components: []
             });
 
-            const timeResp = await collectText(channel, userId,
-                '🗓️ اكتب التاريخ والوقت بتوقيت الرياض:\n```\nالصيغة: YYYY-MM-DD HH:MM\nمثال:  2025-06-20 15:30\n```', guild);
-            if (!timeResp) return;
+            // السؤال 1: بعد كم يوم؟
+            const daysResp = await collectText(channel, userId, '📅 **بعد كم يوم؟**\n\n• اكتب `0` لو اليوم\n• اكتب `1` لو بكرة\n• وهكذا...', guild);
+            if (!daysResp) return;
 
-            const match = timeResp.content.trim().match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
-            if (!match) {
-                return channel.send({ embeds: [errorEmbed(guild, 'صيغة غلط — استخدم: `YYYY-MM-DD HH:MM`')] });
+            const days = parseInt(daysResp.content.trim());
+            if (isNaN(days) || days < 0) {
+                return channel.send({ embeds: [errorEmbed(guild, 'اكتب رقم صحيح 0 أو أكثر')] });
             }
 
-            const [, yr, mo, dy, hr, mn] = match;
-            const customDate = new Date(`${yr}-${mo}-${dy}T${hr}:${mn}:00+03:00`);
+            // السؤال 2: الساعة كم؟
+            const hourResp = await collectText(channel, userId, '🕐 **الساعة كم؟** (0-23)\n\nاكتب رقم بتوقيت الرياض\n• مثال: `14` = 2 الظهر\n• مثال: `21` = 9 الليل', guild);
+            if (!hourResp) return;
 
-            if (customDate <= new Date()) {
+            const hour = parseInt(hourResp.content.trim());
+            if (isNaN(hour) || hour < 0 || hour > 23) {
+                return channel.send({ embeds: [errorEmbed(guild, 'اكتب رقم من 0 إلى 23')] });
+            }
+
+            // السؤال 3: الدقيقة كم؟
+            const minResp = await collectText(channel, userId, '⏱️ **الدقيقة كم؟** (0-59)\n\n• مثال: `0` = على رأس الساعة\n• مثال: `30` = والنص', guild);
+            if (!minResp) return;
+
+            const minute = parseInt(minResp.content.trim());
+            if (isNaN(minute) || minute < 0 || minute > 59) {
+                return channel.send({ embeds: [errorEmbed(guild, 'اكتب رقم من 0 إلى 59')] });
+            }
+
+            // حساب التاريخ بتوقيت الرياض
+            // نحصل على التاريخ الحالي بتوقيت الرياض
+            const nowRiyadh = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Riyadh' }));
+            const targetDate = new Date(nowRiyadh);
+            targetDate.setDate(targetDate.getDate() + days);
+            targetDate.setHours(hour, minute, 0, 0);
+
+            // بناء ISO string بـ +03:00
+            const yr = targetDate.getFullYear();
+            const mo = String(targetDate.getMonth() + 1).padStart(2, '0');
+            const dy = String(targetDate.getDate()).padStart(2, '0');
+            const hr = String(hour).padStart(2, '0');
+            const mn = String(minute).padStart(2, '0');
+
+            const riyadhISO = new Date(`${yr}-${mo}-${dy}T${hr}:${mn}:00+03:00`);
+
+            if (riyadhISO <= new Date()) {
                 return channel.send({ embeds: [errorEmbed(guild, 'الوقت هذا في الماضي — اختر وقت مستقبلي')] });
             }
 
-            scheduledTime = customDate.toISOString();
+            scheduledTime = riyadhISO.toISOString();
 
-        } else {
-            // وقت نسبي
-            scheduledTime = new Date(Date.now() + option.ms).toISOString();
-            await schedInt.update({
-                embeds: [makeEmbed(guild, {
-                    author: `✓ ${option.label}`,
-                    color: CONFIG.COLORS.PRIMARY,
-                    description: `الموعد: \`${formatDate(scheduledTime)}\``
-                })],
-                components: []
+            // عرض embed تأكيد الموعد
+            const dayLabel = days === 0 ? 'اليوم' : days === 1 ? 'بكرة' : `بعد ${days} أيام`;
+            const timeLabel12 = hour > 12 ? `${hour - 12}:${mn} مساءً` : hour === 0 ? `12:${mn} صباحاً` : hour === 12 ? `12:${mn} ظهراً` : `${hour}:${mn} صباحاً`;
+
+            const schedConfirmEmbed = makeEmbed(guild, {
+                author: '📅 موعد الإرسال',
+                color: CONFIG.COLORS.WARNING,
+                fields: [
+                    { name: '📆 اليوم', value: `\`${dayLabel}\``, inline: true },
+                    { name: '🕐 الوقت', value: `\`${timeLabel12}\``, inline: true },
+                    { name: '📋 التاريخ الكامل', value: `\`${formatDate(scheduledTime)}\``, inline: true }
+                ],
+                description: '⚠️ **تأكد من هذا الموعد قبل التأكيد النهائي**'
             });
-        }
 
-        if (scheduledTime) broadcastContent.scheduledTime = scheduledTime;
+            await channel.send({ embeds: [schedConfirmEmbed] });
+
+            broadcastContent.scheduledTime = scheduledTime;
+        }
 
     } catch {
         return step4Msg.edit({ embeds: [errorEmbed(guild, 'انتهى الوقت')], components: [] }).catch(() => { });
@@ -818,11 +802,9 @@ async function broadcastFlow(message, isTest = false) {
     }
 
     // ═══ الخطوة 5: Preview + تأكيد ═══
-    // معاينة الرسالة كما ستصل
     await channel.send({ embeds: [infoEmbed(guild, '👁️ معاينة الرسالة', 'هكذا بتوصل الرسالة للأعضاء:')] });
     await channel.send(buildDmPayload(broadcastContent));
 
-    // Grid المعلومات
     const typeLabel = contentType === 'text_only' ? '📄 نص' : contentType === 'image_only' ? '🖼️ صورة' : '📎 نص + صورة';
     const timeLabel = sendNow ? '⚡ الحين' : `🕐 ${formatDate(scheduledTime)}`;
 
@@ -846,7 +828,7 @@ async function broadcastFlow(message, isTest = false) {
     const previewEmbed = makeEmbed(guild, {
         author: '⚡ تأكيد الإرسال',
         color: CONFIG.COLORS.WARNING,
-        description: `كل شي جاهز — تأكد من المعلومات:`,
+        description: 'كل شي جاهز — تأكد من المعلومات:',
         fields: previewFields,
         footer: 'الخطوة 5 من 5'
     });
@@ -879,7 +861,6 @@ async function broadcastFlow(message, isTest = false) {
                 await executeBroadcast(guild, channel, broadcastContent, isTest ? testCount : 0);
 
             } else {
-                // حفظ الجدولة
                 const schedId = `s_${uid()}`;
                 const gd = getGuild(guildId);
 
@@ -1015,7 +996,6 @@ client.once('ready', async () => {
 
     await loadAllSchedules();
 
-    // لوق تشغيل البوت لكل سيرفر فيه لوق
     const data = loadData();
     for (const [guildId, gd] of Object.entries(data)) {
         if (gd.logChannelId) {
@@ -1034,8 +1014,21 @@ client.on('messageCreate', async (message) => {
     if (!message.content.startsWith(CONFIG.PREFIX)) return;
 
     const args = message.content.slice(CONFIG.PREFIX.length).trim().split(/\s+/);
-    const cmd = args.shift().toLowerCase();
+    let cmd = args.shift().toLowerCase();
     const guild = message.guild;
+
+    // ── معالجة الاختصارات (aliases) — قبل أي أمر ──
+    const guildAliases = getGuild(guild.id).aliases || {};
+    if (guildAliases[cmd]) {
+        const originalCmd = guildAliases[cmd];
+        // لو الأمر الأصلي هو "broadcast test"
+        if (originalCmd === 'broadcast test') {
+            cmd = 'broadcast';
+            args.unshift('test');
+        } else {
+            cmd = originalCmd;
+        }
+    }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     //  HELP
@@ -1089,7 +1082,9 @@ client.on('messageCreate', async (message) => {
             } else if (cat === 'admin') {
                 fields = [
                     { name: `\`${CONFIG.PREFIX}admin\``, value: '⚙️ إعدادات البوت والأدمنز 👑', inline: true },
-                    { name: `\`${CONFIG.PREFIX}setlog\``, value: '📋 تحديد قناة السجل 👑', inline: true }
+                    { name: `\`${CONFIG.PREFIX}setlog\``, value: '📋 تحديد قناة السجل 👑', inline: true },
+                    { name: `\`${CONFIG.PREFIX}addemoji\``, value: '😀 إضافة إيموجي للسيرفر 👑', inline: true },
+                    { name: `\`${CONFIG.PREFIX}addcmd\``, value: '🔗 إضافة اختصار لأمر 👑', inline: true }
                 ];
             } else if (cat === 'owner') {
                 fields = [
@@ -1435,7 +1430,6 @@ client.on('messageCreate', async (message) => {
 
             const choice = admInt.values[0];
 
-            // ── تغيير الاسم ──
             if (choice === 'name') {
                 const mTs = uid();
                 const modal = new ModalBuilder().setCustomId(`adm_name_${mTs}`).setTitle('تغيير اسم البوت');
@@ -1458,10 +1452,8 @@ client.on('messageCreate', async (message) => {
                         await modalInt.update({ embeds: [errorEmbed(guild, `فشل: ${err.message}\n\`تغيير الاسم محدود بمرتين/ساعة\``)], components: [] });
                     }
                 } catch { }
-            }
 
-            // ── تغيير الصورة ──
-            else if (choice === 'avatar') {
+            } else if (choice === 'avatar') {
                 await admInt.update({ embeds: [makeEmbed(guild, { author: '🖼️ تغيير الصورة', color: CONFIG.COLORS.GOLD })], components: [] });
                 const resp = await collectText(message.channel, message.author.id, '🖼️ أرسل الصورة الجديدة — رابط أو ارفق ملف:', guild);
                 if (!resp) return;
@@ -1475,10 +1467,8 @@ client.on('messageCreate', async (message) => {
                 } catch (err) {
                     await message.channel.send({ embeds: [errorEmbed(guild, `فشل: ${err.message}`)] });
                 }
-            }
 
-            // ── تغيير البايو ──
-            else if (choice === 'bio') {
+            } else if (choice === 'bio') {
                 const mTs = uid();
                 const modal = new ModalBuilder().setCustomId(`adm_bio_${mTs}`).setTitle('تغيير البايو');
                 modal.addComponents(new ActionRowBuilder().addComponents(
@@ -1499,10 +1489,8 @@ client.on('messageCreate', async (message) => {
                         await modalInt.update({ embeds: [errorEmbed(guild, `فشل: ${err.message}`)], components: [] });
                     }
                 } catch { }
-            }
 
-            // ── تغيير الستاتس ──
-            else if (choice === 'status') {
+            } else if (choice === 'status') {
                 const tsAct = uid();
                 const actMenu = new StringSelectMenuBuilder()
                     .setCustomId(`act_${tsAct}`)
@@ -1587,10 +1575,8 @@ client.on('messageCreate', async (message) => {
                         `النوع: **${actType}** | النص: **${statusText}** | الحالة: **${statusType}**`, message.author.id);
 
                 } catch { }
-            }
 
-            // ── إضافة Admin ──
-            else if (choice === 'add') {
+            } else if (choice === 'add') {
                 await admInt.update({ embeds: [makeEmbed(guild, { author: '➕ إضافة Admin', color: CONFIG.COLORS.GOLD })], components: [] });
                 const resp = await collectText(message.channel, message.author.id, '👤 اكتب آيدي المستخدم أو سوله منشن:', guild);
                 if (!resp) return;
@@ -1612,10 +1598,8 @@ client.on('messageCreate', async (message) => {
                 saveGuild(guild.id, gd);
                 await message.channel.send({ embeds: [successEmbed(guild, `🟢 تم إضافة <@${targetId}> كأدمن`)] });
                 await sendLog(guild.id, CONFIG.COLORS.INFO, 'إضافة أدمن', `<@${targetId}> \`${targetId}\``, message.author.id);
-            }
 
-            // ── حذف Admin ──
-            else if (choice === 'remove') {
+            } else if (choice === 'remove') {
                 const gd = getGuild(guild.id);
                 if (gd.admins.length === 0) {
                     return admInt.update({ embeds: [makeEmbed(guild, { author: '📋 الأدمنز', color: CONFIG.COLORS.PRIMARY, description: '📭 ما في أدمنز حالياً' })], components: [] });
@@ -1632,10 +1616,8 @@ client.on('messageCreate', async (message) => {
                 saveGuild(guild.id, gd);
                 await message.channel.send({ embeds: [successEmbed(guild, `🔴 تم حذف <@${removeId}> من الأدمنز`)] });
                 await sendLog(guild.id, CONFIG.COLORS.INFO, 'حذف أدمن', `<@${removeId}> \`${removeId}\``, message.author.id);
-            }
 
-            // ── قائمة الأدمنز ──
-            else if (choice === 'list') {
+            } else if (choice === 'list') {
                 const gd = getGuild(guild.id);
                 const admins = gd.admins;
 
@@ -1668,6 +1650,313 @@ client.on('messageCreate', async (message) => {
         } catch {
             adminMsg.edit({ embeds: [errorEmbed(guild, 'انتهى الوقت')], components: [] }).catch(() => { });
         }
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    //  ADDEMOJI — إضافة إيموجي للسيرفر
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    else if (cmd === 'addemoji') {
+        if (!isOwner(message.author.id)) {
+            return message.reply({ embeds: [errorEmbed(guild, '👑 هذا الأمر خاص بالمالك فقط')] });
+        }
+
+        // طلب الإيموجي
+        const emojiResp = await collectText(message.channel, message.author.id,
+            '😀 أرسل **الإيموجي** اللي تبي تضيفه\n\n• لازم يكون إيموجي مخصص (Custom Emoji)\n• مثال: `<:name:123456>` أو `<a:name:123456>`\n• الإيموجي العادية ما تنفع',
+            guild
+        );
+        if (!emojiResp) return;
+
+        // استخراج بيانات الإيموجي من الرسالة
+        const emojiMatch = emojiResp.content.match(/<(a?):(\w+):(\d+)>/);
+
+        if (!emojiMatch) {
+            return message.channel.send({
+                embeds: [errorEmbed(guild, '❌ هذا مو إيموجي مخصص!\n\nلازم يكون بصيغة:\n`<:name:id>` أو `<a:name:id>`\n\nالإيموجي العادية (يونيكود) ما تنفع')]
+            });
+        }
+
+        const isAnimated = emojiMatch[1] === 'a';
+        const emojiName = emojiMatch[2];
+        const emojiId = emojiMatch[3];
+        const emojiExtension = isAnimated ? 'gif' : 'png';
+        const emojiUrl = `https://cdn.discordapp.com/emojis/${emojiId}.${emojiExtension}?size=128`;
+
+        // عرض معلومات الإيموجي + تأكيد
+        const ts = uid();
+        const confirmBtn = new ButtonBuilder().setCustomId(`emoji_yes_${ts}`).setLabel('✅ أضف').setStyle(ButtonStyle.Success);
+        const cancelBtn = new ButtonBuilder().setCustomId(`emoji_no_${ts}`).setLabel('❌ إلغاء').setStyle(ButtonStyle.Danger);
+
+        const previewEmbed = makeEmbed(guild, {
+            author: '😀 معاينة الإيموجي',
+            color: CONFIG.COLORS.WARNING,
+            thumbnail: emojiUrl,
+            fields: [
+                { name: '📌 الاسم', value: `\`${emojiName}\``, inline: true },
+                { name: '🆔 الآيدي', value: `\`${emojiId}\``, inline: true },
+                { name: '🎞️ النوع', value: isAnimated ? '🟢 متحرك (GIF)' : '🔴 ثابت (PNG)', inline: true }
+            ],
+            description: 'تأكد من الإيموجي قبل الإضافة:'
+        });
+
+        const confirmMsg = await message.channel.send({
+            embeds: [previewEmbed],
+            components: [new ActionRowBuilder().addComponents(confirmBtn, cancelBtn)]
+        });
+
+        try {
+            const int = await confirmMsg.awaitMessageComponent({
+                filter: i => i.user.id === message.author.id,
+                componentType: ComponentType.Button,
+                time: CONFIG.COLLECTOR_TIMEOUT
+            });
+
+            if (int.customId === `emoji_yes_${ts}`) {
+                await int.update({
+                    embeds: [makeEmbed(guild, { author: '⏳ جاري الإضافة...', color: CONFIG.COLORS.INFO })],
+                    components: []
+                });
+
+                try {
+                    // التحقق من صلاحية إدارة الإيموجي
+                    const botMember = await guild.members.fetch(client.user.id);
+                    if (!botMember.permissions.has('ManageGuildExpressions')) {
+                        return message.channel.send({
+                            embeds: [errorEmbed(guild, '🔒 البوت ما عنده صلاحية **Manage Expressions**\n\nأعطه الصلاحية وحاول مرة ثانية')]
+                        });
+                    }
+
+                    // إضافة الإيموجي
+                    const newEmoji = await guild.emojis.create({
+                        attachment: emojiUrl,
+                        name: emojiName
+                    });
+
+                    // كود الاستخدام
+                    const useCode = newEmoji.animated ? `<a:${newEmoji.name}:${newEmoji.id}>` : `<:${newEmoji.name}:${newEmoji.id}>`;
+
+                    const successEmbedMsg = makeEmbed(guild, {
+                        author: '✓ تم إضافة الإيموجي',
+                        color: CONFIG.COLORS.SUCCESS,
+                        thumbnail: newEmoji.url,
+                        fields: [
+                            { name: '📌 الاسم', value: `\`${newEmoji.name}\``, inline: true },
+                            { name: '🆔 الآيدي', value: `\`${newEmoji.id}\``, inline: true },
+                            { name: '💬 كود الاستخدام', value: `\`${useCode}\``, inline: true }
+                        ],
+                        description: `${useCode} تم إضافته بنجاح!`
+                    });
+
+                    await message.channel.send({ embeds: [successEmbedMsg] });
+
+                    // لوق
+                    await sendLog(guild.id, CONFIG.COLORS.SUCCESS, 'إضافة إيموجي',
+                        `📌 الاسم: **${newEmoji.name}** | 🆔 \`${newEmoji.id}\` | 🎞️ ${newEmoji.animated ? 'متحرك' : 'ثابت'}`,
+                        message.author.id
+                    );
+
+                } catch (err) {
+                    let errorMsg = `فشل إضافة الإيموجي: ${err.message}`;
+
+                    if (err.code === 30008) {
+                        errorMsg = '❌ السيرفر وصل الحد الأقصى من الإيموجي!\nاحذف بعض الإيموجي وحاول مرة ثانية';
+                    } else if (err.code === 50013) {
+                        errorMsg = '🔒 البوت ما عنده صلاحية كافية';
+                    }
+
+                    await message.channel.send({ embeds: [errorEmbed(guild, errorMsg)] });
+                }
+
+            } else {
+                await int.update({
+                    embeds: [makeEmbed(guild, { author: '❌ تم الإلغاء', color: CONFIG.COLORS.ERROR })],
+                    components: []
+                });
+            }
+
+        } catch {
+            confirmMsg.edit({ embeds: [errorEmbed(guild, 'انتهى الوقت')], components: [] }).catch(() => { });
+        }
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    //  ADDCMD — إضافة اختصار لأمر
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    else if (cmd === 'addcmd') {
+        if (!isOwner(message.author.id)) {
+            return message.reply({ embeds: [errorEmbed(guild, '👑 هذا الأمر خاص بالمالك فقط')] });
+        }
+
+        const gd = getGuild(guild.id);
+        const aliases = gd.aliases || {};
+
+        // عرض الاختصارات الحالية
+        const currentAliases = Object.entries(aliases);
+        let aliasListText = '';
+
+        if (currentAliases.length === 0) {
+            aliasListText = '📭 لا توجد اختصارات حالياً';
+        } else {
+            aliasListText = currentAliases.map(([alias, original]) =>
+                `\`${CONFIG.PREFIX}${alias}\` → \`${CONFIG.PREFIX}${original}\``
+            ).join('\n');
+        }
+
+        // قائمة الأوامر المتاحة للاختصار
+        const ts = uid();
+        const cmdMenu = new StringSelectMenuBuilder()
+            .setCustomId(`addcmd_${ts}`)
+            .setPlaceholder('اختر الأمر اللي تبي تسوي له اختصار...')
+            .addOptions([
+                { label: 'broadcast', description: 'إرسال برودكاست', value: 'broadcast', emoji: '📤' },
+                { label: 'broadcast test', description: 'برودكاست تجريبي', value: 'broadcast test', emoji: '🧪' },
+                { label: 'scheduled', description: 'الرسائل المجدولة', value: 'scheduled', emoji: '⏰' },
+                { label: 'resend', description: 'إعادة إرسال', value: 'resend', emoji: '🔄' },
+                { label: 'stats', description: 'الإحصائيات', value: 'stats', emoji: '📊' },
+                { label: 'help', description: 'المساعدة', value: 'help', emoji: '📖' },
+                { label: 'admin', description: 'الإعدادات', value: 'admin', emoji: '⚙️' },
+                { label: 'setlog', description: 'قناة السجل', value: 'setlog', emoji: '📋' },
+                { label: 'addemoji', description: 'إضافة إيموجي', value: 'addemoji', emoji: '😀' },
+                { label: 'addcmd', description: 'إضافة اختصار', value: 'addcmd', emoji: '🔗' }
+            ]);
+
+        // زر لحذف اختصار موجود (لو فيه اختصارات)
+        const components = [new ActionRowBuilder().addComponents(cmdMenu)];
+
+        // لو فيه اختصارات — نضيف زر حذف
+        let deleteMenu = null;
+        if (currentAliases.length > 0) {
+            const tsD = uid();
+            deleteMenu = new StringSelectMenuBuilder()
+                .setCustomId(`delcmd_${tsD}`)
+                .setPlaceholder('🗑️ أو اختر اختصار تبي تحذفه...')
+                .addOptions(currentAliases.map(([alias, original]) => ({
+                    label: `حذف: ${alias}`,
+                    description: `اختصار لـ ${original}`,
+                    value: alias,
+                    emoji: '🗑️'
+                })));
+
+            components.push(new ActionRowBuilder().addComponents(deleteMenu));
+        }
+
+        const addcmdEmbed = makeEmbed(guild, {
+            author: '🔗 إدارة الاختصارات',
+            color: CONFIG.COLORS.GOLD,
+            description: `**الاختصارات الحالية:**\n${aliasListText}\n\n**اختر أمر عشان تسوي له اختصار:**\n${currentAliases.length > 0 ? '**أو اختر اختصار تبي تحذفه من القائمة الثانية**' : ''}`
+        });
+
+        const addcmdMsg = await message.reply({
+            embeds: [addcmdEmbed],
+            components
+        });
+
+        const collector = addcmdMsg.createMessageComponentCollector({
+            filter: i => i.user.id === message.author.id,
+            componentType: ComponentType.StringSelect,
+            time: CONFIG.COLLECTOR_TIMEOUT
+        });
+
+        collector.on('collect', async (int) => {
+            // ── حذف اختصار ──
+            if (int.customId.startsWith('delcmd_')) {
+                const aliasToDelete = int.values[0];
+
+                const freshGd = getGuild(guild.id);
+                if (freshGd.aliases && freshGd.aliases[aliasToDelete]) {
+                    const originalCmd = freshGd.aliases[aliasToDelete];
+                    delete freshGd.aliases[aliasToDelete];
+                    saveGuild(guild.id, freshGd);
+
+                    await int.update({
+                        embeds: [successEmbed(guild, `🗑️ تم حذف الاختصار: \`${CONFIG.PREFIX}${aliasToDelete}\` → \`${CONFIG.PREFIX}${originalCmd}\``)],
+                        components: []
+                    });
+
+                    await sendLog(guild.id, CONFIG.COLORS.WARNING, 'حذف اختصار أمر',
+                        `🗑️ \`${CONFIG.PREFIX}${aliasToDelete}\` → \`${CONFIG.PREFIX}${originalCmd}\``, message.author.id);
+                }
+
+                collector.stop();
+                return;
+            }
+
+            // ── إضافة اختصار ──
+            const selectedCmd = int.values[0];
+
+            await int.update({
+                embeds: [makeEmbed(guild, {
+                    author: '🔗 إضافة اختصار',
+                    color: CONFIG.COLORS.INFO,
+                    description: `الأمر المختار: \`${CONFIG.PREFIX}${selectedCmd}\`\n\nاكتب الاختصار اللي تبيه...`
+                })],
+                components: []
+            });
+
+            collector.stop();
+
+            // جمع الاختصار من الشات
+            const aliasResp = await collectText(message.channel, message.author.id,
+                `✏️ اكتب **الاختصار** اللي تبيه لأمر \`${CONFIG.PREFIX}${selectedCmd}\`\n\n• بدون \`${CONFIG.PREFIX}\`\n• مثال: لو تبي \`${CONFIG.PREFIX}bc\` بدل \`${CONFIG.PREFIX}broadcast\` → اكتب \`bc\``,
+                guild
+            );
+            if (!aliasResp) return;
+
+            const newAlias = aliasResp.content.trim().toLowerCase();
+
+            // التحققات
+            if (newAlias.includes(' ')) {
+                return message.channel.send({ embeds: [errorEmbed(guild, 'الاختصار لازم يكون كلمة وحدة بدون مسافات')] });
+            }
+
+            if (newAlias.length < 1 || newAlias.length > 20) {
+                return message.channel.send({ embeds: [errorEmbed(guild, 'الاختصار لازم يكون بين 1 و 20 حرف')] });
+            }
+
+            // التحقق من التعارض مع الأوامر الأصلية
+            if (CONFIG.ORIGINAL_COMMANDS.includes(newAlias)) {
+                return message.channel.send({
+                    embeds: [errorEmbed(guild, `❌ \`${newAlias}\` هذا أمر أصلي — ما ينفع يكون اختصار!\n\nاختر اسم ثاني`)]
+                });
+            }
+
+            // التحقق إذا الاختصار موجود بالفعل
+            const freshGd = getGuild(guild.id);
+            if (!freshGd.aliases) freshGd.aliases = {};
+
+            if (freshGd.aliases[newAlias]) {
+                return message.channel.send({
+                    embeds: [errorEmbed(guild, `❌ الاختصار \`${newAlias}\` مستخدم بالفعل لأمر \`${freshGd.aliases[newAlias]}\`\n\nاحذفه أولاً أو اختر اسم ثاني`)]
+                });
+            }
+
+            // حفظ الاختصار
+            freshGd.aliases[newAlias] = selectedCmd;
+            saveGuild(guild.id, freshGd);
+
+            const successMsg = makeEmbed(guild, {
+                author: '✓ تم إضافة الاختصار',
+                color: CONFIG.COLORS.SUCCESS,
+                fields: [
+                    { name: '🔗 الاختصار', value: `\`${CONFIG.PREFIX}${newAlias}\``, inline: true },
+                    { name: '📌 الأمر الأصلي', value: `\`${CONFIG.PREFIX}${selectedCmd}\``, inline: true },
+                    { name: '💡 الاستخدام', value: `اكتب \`${CONFIG.PREFIX}${newAlias}\` بدل \`${CONFIG.PREFIX}${selectedCmd}\``, inline: true }
+                ]
+            });
+
+            await message.channel.send({ embeds: [successMsg] });
+
+            await sendLog(guild.id, CONFIG.COLORS.INFO, 'إضافة اختصار أمر',
+                `🔗 \`${CONFIG.PREFIX}${newAlias}\` → \`${CONFIG.PREFIX}${selectedCmd}\``, message.author.id);
+        });
+
+        collector.on('end', async (_, reason) => {
+            if (reason === 'time') {
+                try { await addcmdMsg.edit({ components: [] }); } catch { }
+            }
+        });
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
