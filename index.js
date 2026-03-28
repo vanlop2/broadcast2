@@ -1056,7 +1056,7 @@ client.on('messageCreate', async (message) => {
         const helpEmbed = makeEmbed(guild, {
             author: '📖 مساعدة البوت',
             color: CONFIG.COLORS.INFO,
-            description: `مرحباً <@${message.author.id}>!\n\nبوت البرودكاست الاحترافي — يساعدك ترسل رسائل لكل أعضاء السيرفر عبر DM.\n\n**اختر القسم من القائمة تحت:**`,
+            description: `مرحباً <@${message.author.id}>!\n\nبوت ون برودكاست — للتنبيهات وإعلام الأعضاء  عبر DM.\n\n**اختر القسم من القائمة تحت:**`,
             thumbnail: client.user.displayAvatarURL({ dynamic: true })
         });
 
@@ -1084,11 +1084,11 @@ client.on('messageCreate', async (message) => {
                 ];
             } else if (cat === 'stats') {
                 fields = [
-                    { name: `\`${CONFIG.PREFIX}stats\``, value: '📊 إحصائيات السيرفر الكاملة', inline: true }
+                    { name: `\`${CONFIG.PREFIX}stats\``, value: '📊 إحصائيات السيرفر ', inline: true }
                 ];
             } else if (cat === 'admin') {
                 fields = [
-                    { name: `\`${CONFIG.PREFIX}admin\``, value: '⚙️ إعدادات البوت والأدمنز 👑', inline: true },
+                    { name: `\`${CONFIG.PREFIX}admin\``, value: '⚙️ إعدادات البوت والمشرفين 👑', inline: true },
                     { name: `\`${CONFIG.PREFIX}setlog\``, value: '📋 تحديد قناة السجل 👑', inline: true }
                 ];
             } else if (cat === 'owner') {
