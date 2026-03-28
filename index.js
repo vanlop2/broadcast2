@@ -195,7 +195,6 @@ function fetchImageAsBase64(url) {
             if (res.statusCode !== 200) {
                 return reject(new Error(`HTTP ${res.statusCode}`));
             }
-
             const chunks = [];
             res.on('data', chunk => chunks.push(chunk));
             res.on('end', () => {
@@ -206,7 +205,6 @@ function fetchImageAsBase64(url) {
                 else if (contentType.includes('jpeg') || contentType.includes('jpg')) mimeType = 'image/jpeg';
                 else if (contentType.includes('webp')) mimeType = 'image/webp';
                 else if (contentType.includes('png')) mimeType = 'image/png';
-
                 const base64 = buffer.toString('base64');
                 resolve(`data:${mimeType};base64,${base64}`);
             });
@@ -268,13 +266,10 @@ async function sendLog(guildId, color, action, details, userId) {
     try {
         const gd = getGuild(guildId);
         if (!gd.logChannelId) return;
-
         const guild = client.guilds.cache.get(guildId);
         if (!guild) return;
-
         const ch = await guild.channels.fetch(gd.logChannelId).catch(() => null);
         if (!ch) return;
-
         const embed = makeEmbed(guild, {
             author: '📋 سجل العمليات',
             color: color,
@@ -285,7 +280,6 @@ async function sendLog(guildId, color, action, details, userId) {
             ],
             description: details || undefined
         });
-
         await ch.send({ embeds: [embed] });
     } catch { }
 }
@@ -297,7 +291,6 @@ async function sendLog(guildId, color, action, details, userId) {
 async function collectText(channel, userId, prompt, guild, timeout = CONFIG.COLLECTOR_TIMEOUT) {
     const embed = infoEmbed(guild, '📝 مطلوب إدخال', `${prompt}\n\n\`⏱️ ${Math.floor(timeout / 60000)} دقائق • اكتب "إلغاء" للخروج\``);
     await channel.send({ embeds: [embed] });
-
     try {
         const collected = await channel.awaitMessages({
             filter: m => m.author.id === userId,
@@ -305,7 +298,6 @@ async function collectText(channel, userId, prompt, guild, timeout = CONFIG.COLL
             time: timeout,
             errors: ['time']
         });
-
         const resp = collected.first();
         if (['إلغاء', 'الغاء', 'cancel'].includes(resp.content.trim().toLowerCase())) {
             await channel.send({ embeds: [makeEmbed(guild, { author: '↩️ إلغاء', color: CONFIG.COLORS.WARNING, description: 'تم إلغاء العملية' })] });
@@ -332,28 +324,51 @@ function buildDmPayload(content) {
 }
 
 // ═══════════════════════════════════════════════════════
-//  تنفيذ البرودكاست — نظام احترافي بـ Batches + Rate Limit ذكي
+//  تنفيذ البرودكاست — نظام Batches + Rate Limit ذكي
 // ═══════════════════════════════════════════════════════
 
 async function executeBroadcast(guild, channel, broadcastContent, maxMembers = 0) {
     const startTime = Date.now();
 
-    // جلب كل الأعضاء
-    await guild.members.fetch();
-    let members = guild.members.cache.filter(m => !m.user.bot).map(m => m);
+    // جلب كل الأعضاء — مع إجبار السيرفر يرجع الكل
+    try {
+        await guild.members.fetch({ force: true, limit: 0 });
+    } catch (e) {
+        console.error('[BROADCAST] فشل جلب الأعضاء:', e.message);
+    }
+
+    // انتظار بسيط عشان الكاش يتحدث
+    await sleep(1000);
+
+    let members = [];
+    guild.members.cache.forEach(m => {
+        if (!m.user.bot) members.push(m);
+    });
 
     if (maxMembers > 0 && maxMembers < members.length) {
-        members = members.sort(() => Math.random() - 0.5).slice(0, maxMembers);
+        // خلط عشوائي
+        for (let i = members.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [members[i], members[j]] = [members[j], members[i]];
+        }
+        members = members.slice(0, maxMembers);
     }
 
     const total = members.length;
+
+    if (total === 0) {
+        await channel.send({ embeds: [errorEmbed(guild, '❌ ما لقيت أعضاء للإرسال لهم!')] });
+        return { delivered: 0, failed: 0, blocked: 0, total: 0 };
+    }
+
     let delivered = 0, failed = 0, blocked = 0;
     let rateLimitHits = 0;
 
-    // إرسال رسالة التقدم الأولى
+    // رسالة التقدم الأولى
     const progressEmbed = makeEmbed(guild, {
         author: '📤 جاري الإرسال...',
         color: CONFIG.COLORS.INFO,
+        description: `👥 عدد الأعضاء المستهدفين: **${total}**`,
         fields: [
             { name: '🟢 وصل', value: '`0`', inline: true },
             { name: '🔴 فشل', value: '`0`', inline: true },
@@ -366,35 +381,50 @@ async function executeBroadcast(guild, channel, broadcastContent, maxMembers = 0
 
     const progressMsg = await channel.send({ embeds: [progressEmbed] });
 
-    // دالة إرسال رسالة لعضو واحد مع timeout + retry للـ Rate Limit
+    // دالة إرسال لعضو واحد مع timeout و retry
     async function sendToMember(member) {
         const dmPayload = buildDmPayload(broadcastContent);
 
-        // محاولة أولى
-        try {
-            await Promise.race([
+        // دالة الإرسال الفعلي مع timeout
+        async function attemptSend() {
+            return Promise.race([
                 member.send(dmPayload),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), CONFIG.DM_TIMEOUT))
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('DM_TIMEOUT')), CONFIG.DM_TIMEOUT)
+                )
             ]);
+        }
+
+        // المحاولة الأولى
+        try {
+            await attemptSend();
             return 'delivered';
         } catch (err) {
             // الخاص مقفول
             if (err.code === 50007) return 'blocked';
-
-            // صلاحيات
+            // صلاحيات ناقصة
             if (err.code === 50013) return 'failed';
-
             // Timeout
-            if (err.message === 'TIMEOUT') return 'failed';
+            if (err.message === 'DM_TIMEOUT') return 'failed';
 
-            // Rate Limit — retry مرة وحدة
-            if (err.status === 429 || err.httpStatus === 429) {
+            // Rate Limit — نعيد المحاولة مرة وحدة
+            if (err.status === 429 || err.httpStatus === 429 || err.code === 429) {
                 rateLimitHits++;
-                const retryAfter = (err.retryAfter || err.retry_after || 5) * 1000 + 500;
+
+                // حساب وقت الانتظار — retryAfter في v14 بالمللي ثانية
+                let waitTime = 5000;
+                if (err.retryAfter) {
+                    // لو أقل من 1000 يعني بالثواني، لو أكبر يعني بالمللي
+                    waitTime = err.retryAfter < 1000 ? err.retryAfter * 1000 : err.retryAfter;
+                }
+                waitTime += 500; // buffer إضافي
+
+                const waitSeconds = Math.ceil(waitTime / 1000);
 
                 // تحديث البروقرس بحالة الانتظار
                 try {
-                    const waitSeconds = Math.ceil(retryAfter / 1000);
+                    const processed = delivered + failed + blocked;
+                    const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
                     const waitEmbed = makeEmbed(guild, {
                         author: '📤 جاري الإرسال... ⏳ Rate Limit',
                         color: CONFIG.COLORS.WARNING,
@@ -403,23 +433,20 @@ async function executeBroadcast(guild, channel, broadcastContent, maxMembers = 0
                             { name: '🟢 وصل', value: `\`${delivered}\``, inline: true },
                             { name: '🔴 فشل', value: `\`${failed}\``, inline: true },
                             { name: '⛔ مقفول', value: `\`${blocked}\``, inline: true },
-                            { name: '⏳ متبقي', value: `\`${total - (delivered + failed + blocked)}\``, inline: true },
-                            { name: '📊 التقدم', value: progressBar(Math.round(((delivered + failed + blocked) / total) * 100)), inline: true },
+                            { name: '⏳ متبقي', value: `\`${total - processed}\``, inline: true },
+                            { name: '📊 التقدم', value: progressBar(pct), inline: true },
                             { name: '⚠️ Rate Limits', value: `\`${rateLimitHits}\``, inline: true }
                         ]
                     });
                     await progressMsg.edit({ embeds: [waitEmbed] }).catch(() => { });
                 } catch { }
 
-                // انتظار المدة المطلوبة
-                await sleep(retryAfter);
+                // انتظار
+                await sleep(waitTime);
 
-                // محاولة ثانية بعد الانتظار
+                // المحاولة الثانية
                 try {
-                    await Promise.race([
-                        member.send(dmPayload),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), CONFIG.DM_TIMEOUT))
-                    ]);
+                    await attemptSend();
                     return 'delivered';
                 } catch (retryErr) {
                     if (retryErr.code === 50007) return 'blocked';
@@ -427,36 +454,38 @@ async function executeBroadcast(guild, channel, broadcastContent, maxMembers = 0
                 }
             }
 
-            // أي خطأ ثاني
+            // أي خطأ ثاني — failed وكمّل
             return 'failed';
         }
     }
 
-    // تقسيم الأعضاء لـ batches
+    // تقسيم لـ batches
     const batches = [];
     for (let i = 0; i < members.length; i += CONFIG.BATCH_SIZE) {
         batches.push(members.slice(i, i + CONFIG.BATCH_SIZE));
     }
 
+    console.log(`[BROADCAST] بدأ الإرسال — ${total} عضو — ${batches.length} batch`);
+
     // معالجة كل batch
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
         const batch = batches[batchIndex];
 
-        // إرسال لكل عضو في الـ batch بتأخير بينهم
         for (let memberIndex = 0; memberIndex < batch.length; memberIndex++) {
             const member = batch[memberIndex];
 
+            // حماية — try/catch يلف كل شي عشان ما يوقف أبداً
             try {
                 const result = await sendToMember(member);
                 if (result === 'delivered') delivered++;
                 else if (result === 'blocked') blocked++;
                 else failed++;
-            } catch {
-                // حماية إضافية — لا يوقف الـ loop أبداً
+            } catch (unexpectedErr) {
+                console.error('[BROADCAST] خطأ غير متوقع:', unexpectedErr.message);
                 failed++;
             }
 
-            // تأخير بين كل رسالة داخل الـ batch (ما عدا آخر وحدة)
+            // تأخير بين كل رسالة داخل الـ batch
             if (memberIndex < batch.length - 1) {
                 await sleep(CONFIG.DM_DELAY);
             }
@@ -464,11 +493,11 @@ async function executeBroadcast(guild, channel, broadcastContent, maxMembers = 0
 
         // تحديث البروقرس بعد كل batch
         const processed = delivered + failed + blocked;
-        const pct = Math.round((processed / total) * 100);
+        const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
 
         try {
             const updateEmbed = makeEmbed(guild, {
-                author: '📤 جاري الإرسال...',
+                author: `📤 جاري الإرسال... (${batchIndex + 1}/${batches.length})`,
                 color: CONFIG.COLORS.INFO,
                 fields: [
                     { name: '🟢 وصل', value: `\`${delivered}\``, inline: true },
@@ -482,16 +511,18 @@ async function executeBroadcast(guild, channel, broadcastContent, maxMembers = 0
             await progressMsg.edit({ embeds: [updateEmbed] }).catch(() => { });
         } catch { }
 
-        // انتظار بين كل batch (ما عدا آخر واحد)
+        // انتظار بين كل batch
         if (batchIndex < batches.length - 1) {
             await sleep(CONFIG.BATCH_DELAY);
         }
     }
 
-    // حساب الوقت المستغرق
+    // حساب الوقت
     const elapsed = Date.now() - startTime;
     const elapsedFormatted = formatUptime(elapsed);
     const rate = total > 0 ? Math.round((delivered / total) * 100) : 0;
+
+    console.log(`[BROADCAST] انتهى — وصل: ${delivered} | فشل: ${failed} | مقفول: ${blocked} | النسبة: ${rate}% | الوقت: ${elapsedFormatted}`);
 
     // التقرير النهائي
     const reportFields = [
@@ -503,10 +534,10 @@ async function executeBroadcast(guild, channel, broadcastContent, maxMembers = 0
         { name: '⏱️ الوقت المستغرق', value: `\`${elapsedFormatted}\``, inline: true }
     ];
 
-    // تحذير لو نسبة النجاح أقل من 50%
     let reportDescription = maxMembers > 0 ? '`🧪 وضع التجربة`' : undefined;
     if (rate < 50 && total > 0) {
-        reportDescription = (reportDescription ? reportDescription + '\n\n' : '') + '⚠️ **تحذير: نسبة النجاح أقل من 50%!**\nتأكد إن أغلب الأعضاء فاتحين الخاص.';
+        const warning = '⚠️ **تحذير: نسبة النجاح أقل من 50%!**\nأغلب الأعضاء مقفلين الخاص أو فيه مشكلة.';
+        reportDescription = reportDescription ? reportDescription + '\n\n' + warning : warning;
     }
 
     const reportEmbed = makeEmbed(guild, {
@@ -519,7 +550,7 @@ async function executeBroadcast(guild, channel, broadcastContent, maxMembers = 0
     try {
         await progressMsg.edit({ embeds: [reportEmbed] });
     } catch {
-        await channel.send({ embeds: [reportEmbed] });
+        await channel.send({ embeds: [reportEmbed] }).catch(() => { });
     }
 
     // حفظ الإحصائيات
@@ -1511,7 +1542,7 @@ client.on('messageCreate', async (message) => {
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    //  ADMIN — قائمتين: إعدادات البوت + إدارة المستخدمين
+    //  ADMIN
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     else if (cmd === 'admin') {
@@ -1603,7 +1634,6 @@ client.on('messageCreate', async (message) => {
                 if (!resp) return;
                 const url = extractImage(resp);
                 if (!url) return message.channel.send({ embeds: [errorEmbed(guild, 'ما لقيت صورة صالحة')] });
-
                 try {
                     await message.channel.send({ embeds: [makeEmbed(guild, { author: '⏳ جاري تحميل وتطبيق البنر...', color: CONFIG.COLORS.INFO })] });
                     const dataURI = await fetchImageAsBase64(url);
@@ -1830,7 +1860,6 @@ client.on('messageCreate', async (message) => {
                 const gd = getGuild(guild.id);
                 const admins = gd.admins;
                 const owners = gd.owners || [];
-
                 const fields = [];
                 fields.push({ name: '👑 المالك الأصلي', value: `<@${CONFIG.OWNER_ID}>\n\`${CONFIG.OWNER_ID}\``, inline: true });
                 if (owners.length > 0) {
@@ -1846,12 +1875,10 @@ client.on('messageCreate', async (message) => {
                         fields.push({ name: `🛡️ أدمن #${i + 1}`, value: `<@${id}>\n\`${id}\``, inline: true });
                     });
                 }
-
                 await admInt.update({
                     embeds: [makeEmbed(guild, {
                         author: `📋 الأدمنز والـ Owners — ${1 + owners.length + admins.length}`,
-                        color: CONFIG.COLORS.GOLD,
-                        fields
+                        color: CONFIG.COLORS.GOLD, fields
                     })],
                     components: []
                 });
