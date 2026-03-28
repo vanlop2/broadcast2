@@ -33,10 +33,7 @@ const CONFIG = {
     PREFIX: '#',
     OWNER_ID: process.env.OWNER_ID,
     TOKEN: process.env.TOKEN,
-    DM_DELAY: 300,
-    BATCH_SIZE: 25,
-    BATCH_DELAY: 2000,
-    DM_TIMEOUT: 10000,
+    DM_DELAY: 1200,
     COLLECTOR_TIMEOUT: 300000,
     DATA_FILE: path.join(__dirname, 'data.json'),
     COLORS: {
@@ -324,29 +321,36 @@ function buildDmPayload(content) {
 }
 
 // ═══════════════════════════════════════════════════════
-//  تنفيذ البرودكاست — نظام Batches + Rate Limit ذكي
+//  حالة البرودكاست — نفس طريقة بوت اللعبة بالضبط
+// ═══════════════════════════════════════════════════════
+
+let broadcastState = {
+    active: false,
+    stopped: false,
+    totalMembers: 0,
+    sent: 0,
+    failed: 0,
+    blocked: 0,
+    remaining: 0,
+    failedMembers: [],
+    statusMessage: null,
+    lastPayload: null,
+    startTime: 0
+};
+
+// ═══════════════════════════════════════════════════════
+//  تنفيذ البرودكاست — نفس طريقة بوت اللعبة بالضبط
 // ═══════════════════════════════════════════════════════
 
 async function executeBroadcast(guild, channel, broadcastContent, maxMembers = 0) {
-    const startTime = Date.now();
+    broadcastState.startTime = Date.now();
 
-    // جلب كل الأعضاء — مع إجبار السيرفر يرجع الكل
-    try {
-        await guild.members.fetch({ force: true, limit: 0 });
-    } catch (e) {
-        console.error('[BROADCAST] فشل جلب الأعضاء:', e.message);
-    }
+    // جلب كل الأعضاء
+    await guild.members.fetch();
 
-    // انتظار بسيط عشان الكاش يتحدث
-    await sleep(1000);
-
-    let members = [];
-    guild.members.cache.forEach(m => {
-        if (!m.user.bot) members.push(m);
-    });
+    let members = guild.members.cache.filter(m => !m.user.bot).map(m => m);
 
     if (maxMembers > 0 && maxMembers < members.length) {
-        // خلط عشوائي
         for (let i = members.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [members[i], members[j]] = [members[j], members[i]];
@@ -361,218 +365,149 @@ async function executeBroadcast(guild, channel, broadcastContent, maxMembers = 0
         return { delivered: 0, failed: 0, blocked: 0, total: 0 };
     }
 
-    let delivered = 0, failed = 0, blocked = 0;
-    let rateLimitHits = 0;
+    // تجهيز الحالة
+    broadcastState.active = true;
+    broadcastState.stopped = false;
+    broadcastState.totalMembers = total;
+    broadcastState.sent = 0;
+    broadcastState.failed = 0;
+    broadcastState.blocked = 0;
+    broadcastState.remaining = total;
+    broadcastState.failedMembers = [];
+    broadcastState.lastPayload = broadcastContent;
 
-    // رسالة التقدم الأولى
-    const progressEmbed = makeEmbed(guild, {
-        author: '📤 جاري الإرسال...',
-        color: CONFIG.COLORS.INFO,
-        description: `👥 عدد الأعضاء المستهدفين: **${total}**`,
-        fields: [
-            { name: '🟢 وصل', value: '`0`', inline: true },
-            { name: '🔴 فشل', value: '`0`', inline: true },
-            { name: '⛔ مقفول', value: '`0`', inline: true },
-            { name: '⏳ متبقي', value: `\`${total}\``, inline: true },
-            { name: '📊 التقدم', value: progressBar(0), inline: true },
-            { name: '👥 الإجمالي', value: `\`${total}\``, inline: true }
-        ]
-    });
+    const dmPayload = buildDmPayload(broadcastContent);
 
-    const progressMsg = await channel.send({ embeds: [progressEmbed] });
+    console.log(`[BROADCAST] بدأ — ${total} عضو`);
 
-    // دالة إرسال لعضو واحد مع timeout و retry
-    async function sendToMember(member) {
-        const dmPayload = buildDmPayload(broadcastContent);
+    // إرسال رسالة الحالة الأولى
+    const statusEmbed = buildBroadcastStatusEmbed(guild);
+    broadcastState.statusMessage = await channel.send(statusEmbed);
 
-        // دالة الإرسال الفعلي مع timeout
-        async function attemptSend() {
-            return Promise.race([
-                member.send(dmPayload),
-                new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('DM_TIMEOUT')), CONFIG.DM_TIMEOUT)
-                )
-            ]);
+    // الإرسال واحد واحد — نفس بوت اللعبة بالضبط
+    for (let i = 0; i < members.length; i++) {
+        // لو الأدمن وقف الإرسال
+        if (broadcastState.stopped) {
+            broadcastState.remaining = members.length - i;
+            break;
         }
 
-        // المحاولة الأولى
+        const member = members[i];
+
         try {
-            await attemptSend();
-            return 'delivered';
-        } catch (err) {
-            // الخاص مقفول
-            if (err.code === 50007) return 'blocked';
-            // صلاحيات ناقصة
-            if (err.code === 50013) return 'failed';
-            // Timeout
-            if (err.message === 'DM_TIMEOUT') return 'failed';
-
-            // Rate Limit — نعيد المحاولة مرة وحدة
-            if (err.status === 429 || err.httpStatus === 429 || err.code === 429) {
-                rateLimitHits++;
-
-                // حساب وقت الانتظار — retryAfter في v14 بالمللي ثانية
-                let waitTime = 5000;
-                if (err.retryAfter) {
-                    // لو أقل من 1000 يعني بالثواني، لو أكبر يعني بالمللي
-                    waitTime = err.retryAfter < 1000 ? err.retryAfter * 1000 : err.retryAfter;
-                }
-                waitTime += 500; // buffer إضافي
-
-                const waitSeconds = Math.ceil(waitTime / 1000);
-
-                // تحديث البروقرس بحالة الانتظار
-                try {
-                    const processed = delivered + failed + blocked;
-                    const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
-                    const waitEmbed = makeEmbed(guild, {
-                        author: '📤 جاري الإرسال... ⏳ Rate Limit',
-                        color: CONFIG.COLORS.WARNING,
-                        description: `⏳ **Rate Limit — انتظر ${waitSeconds}s**`,
-                        fields: [
-                            { name: '🟢 وصل', value: `\`${delivered}\``, inline: true },
-                            { name: '🔴 فشل', value: `\`${failed}\``, inline: true },
-                            { name: '⛔ مقفول', value: `\`${blocked}\``, inline: true },
-                            { name: '⏳ متبقي', value: `\`${total - processed}\``, inline: true },
-                            { name: '📊 التقدم', value: progressBar(pct), inline: true },
-                            { name: '⚠️ Rate Limits', value: `\`${rateLimitHits}\``, inline: true }
-                        ]
-                    });
-                    await progressMsg.edit({ embeds: [waitEmbed] }).catch(() => { });
-                } catch { }
-
-                // انتظار
-                await sleep(waitTime);
-
-                // المحاولة الثانية
-                try {
-                    await attemptSend();
-                    return 'delivered';
-                } catch (retryErr) {
-                    if (retryErr.code === 50007) return 'blocked';
-                    return 'failed';
-                }
+            await member.send(dmPayload);
+            broadcastState.sent++;
+        } catch (e) {
+            if (e.code === 50007) {
+                broadcastState.blocked++;
+            } else {
+                broadcastState.failed++;
             }
-
-            // أي خطأ ثاني — failed وكمّل
-            return 'failed';
+            broadcastState.failedMembers.push(member);
         }
-    }
 
-    // تقسيم لـ batches
-    const batches = [];
-    for (let i = 0; i < members.length; i += CONFIG.BATCH_SIZE) {
-        batches.push(members.slice(i, i + CONFIG.BATCH_SIZE));
-    }
+        broadcastState.remaining = members.length - (i + 1);
 
-    console.log(`[BROADCAST] بدأ الإرسال — ${total} عضو — ${batches.length} batch`);
-
-    // معالجة كل batch
-    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-        const batch = batches[batchIndex];
-
-        for (let memberIndex = 0; memberIndex < batch.length; memberIndex++) {
-            const member = batch[memberIndex];
-
-            // حماية — try/catch يلف كل شي عشان ما يوقف أبداً
+        // تحديث الستاتس كل 5 رسائل أو آخر رسالة
+        if ((i + 1) % 5 === 0 || i === members.length - 1) {
             try {
-                const result = await sendToMember(member);
-                if (result === 'delivered') delivered++;
-                else if (result === 'blocked') blocked++;
-                else failed++;
-            } catch (unexpectedErr) {
-                console.error('[BROADCAST] خطأ غير متوقع:', unexpectedErr.message);
-                failed++;
-            }
-
-            // تأخير بين كل رسالة داخل الـ batch
-            if (memberIndex < batch.length - 1) {
-                await sleep(CONFIG.DM_DELAY);
-            }
+                await broadcastState.statusMessage.edit(buildBroadcastStatusEmbed(guild));
+            } catch (e) { }
         }
 
-        // تحديث البروقرس بعد كل batch
-        const processed = delivered + failed + blocked;
-        const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
-
-        try {
-            const updateEmbed = makeEmbed(guild, {
-                author: `📤 جاري الإرسال... (${batchIndex + 1}/${batches.length})`,
-                color: CONFIG.COLORS.INFO,
-                fields: [
-                    { name: '🟢 وصل', value: `\`${delivered}\``, inline: true },
-                    { name: '🔴 فشل', value: `\`${failed}\``, inline: true },
-                    { name: '⛔ مقفول', value: `\`${blocked}\``, inline: true },
-                    { name: '⏳ متبقي', value: `\`${total - processed}\``, inline: true },
-                    { name: '📊 التقدم', value: progressBar(pct), inline: true },
-                    { name: '👥 الإجمالي', value: `\`${total}\``, inline: true }
-                ]
-            });
-            await progressMsg.edit({ embeds: [updateEmbed] }).catch(() => { });
-        } catch { }
-
-        // انتظار بين كل batch
-        if (batchIndex < batches.length - 1) {
-            await sleep(CONFIG.BATCH_DELAY);
+        // تأخير بين كل رسالة
+        if (i < members.length - 1) {
+            await sleep(CONFIG.DM_DELAY);
         }
     }
 
-    // حساب الوقت
-    const elapsed = Date.now() - startTime;
-    const elapsedFormatted = formatUptime(elapsed);
-    const rate = total > 0 ? Math.round((delivered / total) * 100) : 0;
+    // انتهى الإرسال
+    broadcastState.active = false;
 
-    console.log(`[BROADCAST] انتهى — وصل: ${delivered} | فشل: ${failed} | مقفول: ${blocked} | النسبة: ${rate}% | الوقت: ${elapsedFormatted}`);
+    const elapsed = Date.now() - broadcastState.startTime;
+    const elapsedFormatted = formatUptime(elapsed);
+    const rate = total > 0 ? Math.round((broadcastState.sent / total) * 100) : 0;
+
+    console.log(`[BROADCAST] انتهى — وصل: ${broadcastState.sent} | فشل: ${broadcastState.failed} | مقفول: ${broadcastState.blocked} | النسبة: ${rate}% | الوقت: ${elapsedFormatted}`);
 
     // التقرير النهائي
-    const reportFields = [
-        { name: '🟢 وصل بنجاح', value: `\`${delivered}\``, inline: true },
-        { name: '🔴 فشل', value: `\`${failed}\``, inline: true },
-        { name: '⛔ مقفول الخاص', value: `\`${blocked}\``, inline: true },
-        { name: '👥 الإجمالي', value: `\`${total}\``, inline: true },
-        { name: '📊 نسبة النجاح', value: progressBar(rate), inline: true },
-        { name: '⏱️ الوقت المستغرق', value: `\`${elapsedFormatted}\``, inline: true }
-    ];
-
-    let reportDescription = maxMembers > 0 ? '`🧪 وضع التجربة`' : undefined;
-    if (rate < 50 && total > 0) {
-        const warning = '⚠️ **تحذير: نسبة النجاح أقل من 50%!**\nأغلب الأعضاء مقفلين الخاص أو فيه مشكلة.';
-        reportDescription = reportDescription ? reportDescription + '\n\n' + warning : warning;
-    }
-
-    const reportEmbed = makeEmbed(guild, {
-        author: '📊 التقرير النهائي',
-        color: delivered > 0 ? CONFIG.COLORS.SUCCESS : CONFIG.COLORS.ERROR,
-        description: reportDescription,
-        fields: reportFields
-    });
-
     try {
-        await progressMsg.edit({ embeds: [reportEmbed] });
-    } catch {
-        await channel.send({ embeds: [reportEmbed] }).catch(() => { });
+        await broadcastState.statusMessage.edit(buildBroadcastStatusEmbed(guild, true, elapsedFormatted));
+    } catch (e) {
+        await channel.send(buildBroadcastStatusEmbed(guild, true, elapsedFormatted));
     }
 
     // حفظ الإحصائيات
     const gd = getGuild(guild.id);
     gd.stats.totalBroadcasts++;
-    gd.stats.totalDelivered += delivered;
-    gd.stats.totalFailed += failed;
-    gd.stats.totalBlocked += blocked;
+    gd.stats.totalDelivered += broadcastState.sent;
+    gd.stats.totalFailed += broadcastState.failed;
+    gd.stats.totalBlocked += broadcastState.blocked;
     gd.lastBroadcast = {
         content: { ...broadcastContent },
         timestamp: new Date().toISOString(),
-        stats: { delivered, failed, blocked, total }
+        stats: { delivered: broadcastState.sent, failed: broadcastState.failed, blocked: broadcastState.blocked, total }
     };
     saveGuild(guild.id, gd);
 
     await sendLog(guild.id, CONFIG.COLORS.SUCCESS,
         maxMembers > 0 ? 'برودكاست تجريبي' : 'برودكاست تم إرساله',
-        `🟢 وصل: **${delivered}** | 🔴 فشل: **${failed}** | ⛔ مقفول: **${blocked}** | 📊 النسبة: **${rate}%** | ⏱️ الوقت: **${elapsedFormatted}**`,
+        `🟢 وصل: **${broadcastState.sent}** | 🔴 فشل: **${broadcastState.failed}** | ⛔ مقفول: **${broadcastState.blocked}** | 📊 النسبة: **${rate}%** | ⏱️ الوقت: **${elapsedFormatted}**`,
         'system'
     );
 
-    return { delivered, failed, blocked, total };
+    return { delivered: broadcastState.sent, failed: broadcastState.failed, blocked: broadcastState.blocked, total };
+}
+
+// ═══════════════════════════════════════════════════════
+//  بناء إمبد حالة البرودكاست — نفس طريقة بوت اللعبة
+// ═══════════════════════════════════════════════════════
+
+function buildBroadcastStatusEmbed(guild, isFinal = false, elapsedTime = null) {
+    const { totalMembers, sent, failed, blocked, remaining, active, stopped } = broadcastState;
+    const processed = sent + failed + blocked;
+    const pct = totalMembers > 0 ? Math.round((processed / totalMembers) * 100) : 0;
+    const rate = processed > 0 ? Math.round((sent / processed) * 100) : 0;
+
+    let statusText, statusColor;
+    if (stopped) {
+        statusText = '⏹️ تم إيقاف الإرسال';
+        statusColor = CONFIG.COLORS.ERROR;
+    } else if (isFinal || (!active && processed > 0)) {
+        statusText = '✅ اكتمل الإرسال';
+        statusColor = sent > 0 ? CONFIG.COLORS.SUCCESS : CONFIG.COLORS.ERROR;
+    } else {
+        statusText = '🔄 جاري الإرسال...';
+        statusColor = CONFIG.COLORS.INFO;
+    }
+
+    const fields = [
+        { name: '🟢 وصل', value: `\`${sent}\``, inline: true },
+        { name: '🔴 فشل', value: `\`${failed}\``, inline: true },
+        { name: '⛔ مقفول', value: `\`${blocked}\``, inline: true },
+        { name: '⏳ متبقي', value: `\`${remaining}\``, inline: true },
+        { name: '📊 التقدم', value: progressBar(pct), inline: true },
+        { name: '👥 الإجمالي', value: `\`${totalMembers}\``, inline: true }
+    ];
+
+    if (isFinal && elapsedTime) {
+        fields.push({ name: '⏱️ الوقت المستغرق', value: `\`${elapsedTime}\``, inline: true });
+        fields.push({ name: '📬 نسبة النجاح', value: progressBar(rate), inline: true });
+    }
+
+    let description = statusText;
+    if (isFinal && rate < 50 && totalMembers > 0) {
+        description += '\n\n⚠️ **تحذير: نسبة النجاح أقل من 50%!**\nأغلب الأعضاء مقفلين الخاص.';
+    }
+
+    const embed = makeEmbed(guild, {
+        author: isFinal ? '📊 التقرير النهائي' : '📤 جاري الإرسال...',
+        color: statusColor,
+        description: description,
+        fields: fields
+    });
+
+    return { embeds: [embed] };
 }
 
 // ═══════════════════════════════════════════════════════
@@ -584,6 +519,11 @@ async function broadcastFlow(message, isTest = false) {
     const channel = message.channel;
     const guild = message.guild;
     const guildId = guild.id;
+
+    // تأكد ما فيه برودكاست شغال
+    if (broadcastState.active) {
+        return message.reply({ embeds: [errorEmbed(guild, '❌ فيه برودكاست شغال حالياً — انتظر يخلص!')] });
+    }
 
     // ═══ الخطوة 1: نوع المحتوى ═══
     const ts1 = uid();
@@ -1549,344 +1489,38 @@ client.on('messageCreate', async (message) => {
         if (!isOwner(message.author.id, guild.id)) return message.reply({ embeds: [errorEmbed(guild, '👑 هذا الأمر خاص بالمالك فقط')] });
 
         const ts = uid();
-
-        const botSettingsMenu = new StringSelectMenuBuilder()
-            .setCustomId(`adm_bot_${ts}`)
-            .setPlaceholder('⚙️ إعدادات البوت...')
-            .addOptions([
-                { label: 'تغيير اسم البوت', value: 'name', emoji: '✏️' },
-                { label: 'تغيير صورة البوت', value: 'avatar', emoji: '🖼️' },
-                { label: 'تغيير بنر البوت', value: 'banner', emoji: '🏞️' },
-                { label: 'تغيير البايو', value: 'bio', emoji: '📝' },
-                { label: 'تغيير الستاتس والأكتيفيتي', value: 'status', emoji: '🎯' },
-                { label: 'تغيير الحالة فقط', value: 'presence', emoji: '🟢' }
-            ]);
-
-        const usersMenu = new StringSelectMenuBuilder()
-            .setCustomId(`adm_users_${ts}`)
-            .setPlaceholder('👥 إدارة المستخدمين...')
-            .addOptions([
-                { label: 'إضافة Admin', value: 'add', emoji: '➕' },
-                { label: 'حذف Admin', value: 'remove', emoji: '➖' },
-                { label: 'إضافة Owner', value: 'add_owner', emoji: '👑' },
-                { label: 'حذف Owner', value: 'remove_owner', emoji: '🗑️' },
-                { label: 'قائمة الأدمنز والـ Owners', value: 'list', emoji: '📋' }
-            ]);
-
-        const adminEmbed = makeEmbed(guild, {
-            author: '⚙️ لوحة الإعدادات',
-            color: CONFIG.COLORS.GOLD,
-            description: `مرحباً 👑 <@${message.author.id}>\n\n**القائمة الأولى:** إعدادات البوت\n**القائمة الثانية:** إدارة المستخدمين`
-        });
+        const botSettingsMenu = new StringSelectMenuBuilder().setCustomId(`adm_bot_${ts}`).setPlaceholder('⚙️ إعدادات البوت...').addOptions([
+            { label: 'تغيير اسم البوت', value: 'name', emoji: '✏️' }, { label: 'تغيير صورة البوت', value: 'avatar', emoji: '🖼️' },
+            { label: 'تغيير بنر البوت', value: 'banner', emoji: '🏞️' }, { label: 'تغيير البايو', value: 'bio', emoji: '📝' },
+            { label: 'تغيير الستاتس والأكتيفيتي', value: 'status', emoji: '🎯' }, { label: 'تغيير الحالة فقط', value: 'presence', emoji: '🟢' }
+        ]);
+        const usersMenu = new StringSelectMenuBuilder().setCustomId(`adm_users_${ts}`).setPlaceholder('👥 إدارة المستخدمين...').addOptions([
+            { label: 'إضافة Admin', value: 'add', emoji: '➕' }, { label: 'حذف Admin', value: 'remove', emoji: '➖' },
+            { label: 'إضافة Owner', value: 'add_owner', emoji: '👑' }, { label: 'حذف Owner', value: 'remove_owner', emoji: '🗑️' },
+            { label: 'قائمة الأدمنز والـ Owners', value: 'list', emoji: '📋' }
+        ]);
 
         const adminMsg = await message.reply({
-            embeds: [adminEmbed],
-            components: [
-                new ActionRowBuilder().addComponents(botSettingsMenu),
-                new ActionRowBuilder().addComponents(usersMenu)
-            ]
+            embeds: [makeEmbed(guild, { author: '⚙️ لوحة الإعدادات', color: CONFIG.COLORS.GOLD, description: `مرحباً 👑 <@${message.author.id}>\n\n**القائمة الأولى:** إعدادات البوت\n**القائمة الثانية:** إدارة المستخدمين` })],
+            components: [new ActionRowBuilder().addComponents(botSettingsMenu), new ActionRowBuilder().addComponents(usersMenu)]
         });
 
         try {
-            const admInt = await adminMsg.awaitMessageComponent({
-                filter: i => i.user.id === message.author.id && (i.customId === `adm_bot_${ts}` || i.customId === `adm_users_${ts}`),
-                componentType: ComponentType.StringSelect,
-                time: CONFIG.COLLECTOR_TIMEOUT
-            });
-
+            const admInt = await adminMsg.awaitMessageComponent({ filter: i => i.user.id === message.author.id && (i.customId === `adm_bot_${ts}` || i.customId === `adm_users_${ts}`), componentType: ComponentType.StringSelect, time: CONFIG.COLLECTOR_TIMEOUT });
             const choice = admInt.values[0];
 
-            if (choice === 'name') {
-                const mTs = uid();
-                const modal = new ModalBuilder().setCustomId(`adm_name_${mTs}`).setTitle('تغيير اسم البوت');
-                modal.addComponents(new ActionRowBuilder().addComponents(
-                    new TextInputBuilder().setCustomId('new_name').setLabel('الاسم الجديد').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(32).setValue(client.user.username)
-                ));
-                await admInt.showModal(modal);
-                try {
-                    const modalInt = await admInt.awaitModalSubmit({ filter: i => i.customId === `adm_name_${mTs}`, time: CONFIG.COLLECTOR_TIMEOUT });
-                    const newName = modalInt.fields.getTextInputValue('new_name');
-                    const oldName = client.user.username;
-                    try {
-                        await client.user.setUsername(newName);
-                        await modalInt.update({ embeds: [successEmbed(guild, `تم تغيير الاسم: **${oldName}** → **${newName}**`)], components: [] });
-                        await sendLog(guild.id, CONFIG.COLORS.INFO, 'تغيير اسم البوت', `**${oldName}** → **${newName}**`, message.author.id);
-                    } catch (err) { await modalInt.update({ embeds: [errorEmbed(guild, `فشل: ${err.message}\n\`تغيير الاسم محدود بمرتين/ساعة\``)], components: [] }); }
-                } catch { }
-            }
-
-            else if (choice === 'avatar') {
-                await admInt.update({ embeds: [makeEmbed(guild, { author: '🖼️ تغيير الصورة', color: CONFIG.COLORS.GOLD })], components: [] });
-                const resp = await collectText(message.channel, message.author.id, '🖼️ أرسل الصورة الجديدة — رابط أو ارفق ملف:', guild);
-                if (!resp) return;
-                const url = extractImage(resp);
-                if (!url) return message.channel.send({ embeds: [errorEmbed(guild, 'ما لقيت صورة صالحة')] });
-                try {
-                    await client.user.setAvatar(url);
-                    await message.channel.send({ embeds: [successEmbed(guild, 'تم تغيير صورة البوت')] });
-                    await sendLog(guild.id, CONFIG.COLORS.INFO, 'تغيير صورة البوت', null, message.author.id);
-                } catch (err) { await message.channel.send({ embeds: [errorEmbed(guild, `فشل: ${err.message}`)] }); }
-            }
-
-            else if (choice === 'banner') {
-                await admInt.update({ embeds: [makeEmbed(guild, { author: '🏞️ تغيير البنر', color: CONFIG.COLORS.GOLD, description: '⚠️ البنر يحتاج البوت يكون عنده Nitro أو مطور تطبيقات نشط' })], components: [] });
-                const resp = await collectText(message.channel, message.author.id, '🏞️ أرسل صورة البنر — رابط أو ارفق ملف:', guild);
-                if (!resp) return;
-                const url = extractImage(resp);
-                if (!url) return message.channel.send({ embeds: [errorEmbed(guild, 'ما لقيت صورة صالحة')] });
-                try {
-                    await message.channel.send({ embeds: [makeEmbed(guild, { author: '⏳ جاري تحميل وتطبيق البنر...', color: CONFIG.COLORS.INFO })] });
-                    const dataURI = await fetchImageAsBase64(url);
-                    await client.rest.patch('/users/@me', { body: { banner: dataURI } });
-                    await message.channel.send({ embeds: [successEmbed(guild, '✅ تم تغيير بنر البوت بنجاح!')] });
-                    await sendLog(guild.id, CONFIG.COLORS.INFO, 'تغيير بنر البوت', null, message.author.id);
-                } catch (err) {
-                    let errorMsg = `فشل تغيير البنر: ${err.message}`;
-                    if (err.message?.includes('BASE_TYPE_BAD_LENGTH') || err.code === 50006) {
-                        errorMsg = '❌ فشل تغيير البنر — تأكد إن الصورة صالحة وحجمها مناسب';
-                    } else if (err.status === 400) {
-                        errorMsg = '❌ فشل — البوت قد ما يدعم البنر (يحتاج Nitro أو حساب مطور نشط)';
-                    }
-                    await message.channel.send({ embeds: [errorEmbed(guild, errorMsg)] });
-                }
-            }
-
-            else if (choice === 'bio') {
-                const mTs = uid();
-                const modal = new ModalBuilder().setCustomId(`adm_bio_${mTs}`).setTitle('تغيير البايو');
-                modal.addComponents(new ActionRowBuilder().addComponents(
-                    new TextInputBuilder().setCustomId('new_bio').setLabel('البايو الجديد').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(190)
-                ));
-                await admInt.showModal(modal);
-                try {
-                    const modalInt = await admInt.awaitModalSubmit({ filter: i => i.customId === `adm_bio_${mTs}`, time: CONFIG.COLLECTOR_TIMEOUT });
-                    const newBio = modalInt.fields.getTextInputValue('new_bio');
-                    try {
-                        await client.rest.patch('/users/@me', { body: { bio: newBio } });
-                        await modalInt.update({ embeds: [successEmbed(guild, `تم تحديث البايو:\n> ${newBio}`)], components: [] });
-                        await sendLog(guild.id, CONFIG.COLORS.INFO, 'تغيير بايو البوت', newBio, message.author.id);
-                    } catch (err) { await modalInt.update({ embeds: [errorEmbed(guild, `فشل: ${err.message}`)], components: [] }); }
-                } catch { }
-            }
-
-            else if (choice === 'status') {
-                const tsAct = uid();
-                const actMenu = new StringSelectMenuBuilder()
-                    .setCustomId(`act_${tsAct}`)
-                    .setPlaceholder('نوع الأكتيفيتي...')
-                    .addOptions([
-                        { label: 'Playing', value: 'playing', emoji: '🎮' },
-                        { label: 'Watching', value: 'watching', emoji: '👁️' },
-                        { label: 'Listening', value: 'listening', emoji: '🎧' },
-                        { label: 'Competing', value: 'competing', emoji: '🏅' },
-                        { label: 'Streaming', value: 'streaming', emoji: '🔴' },
-                        { label: 'Custom', value: 'custom', emoji: '💫' }
-                    ]);
-
-                await admInt.update({
-                    embeds: [makeEmbed(guild, { author: '🎯 نوع الأكتيفيتي', color: CONFIG.COLORS.GOLD, description: 'اختر النوع:' })],
-                    components: [new ActionRowBuilder().addComponents(actMenu)]
-                });
-
-                try {
-                    const actInt = await message.channel.awaitMessageComponent({
-                        filter: i => i.user.id === message.author.id && i.customId === `act_${tsAct}`,
-                        componentType: ComponentType.StringSelect, time: CONFIG.COLLECTOR_TIMEOUT
-                    });
-
-                    const actType = actInt.values[0];
-                    const mTs = uid();
-                    const modal = new ModalBuilder().setCustomId(`status_text_${mTs}`).setTitle('نص الأكتيفيتي');
-                    modal.addComponents(new ActionRowBuilder().addComponents(
-                        new TextInputBuilder().setCustomId('status_text').setLabel('النص').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(128)
-                    ));
-                    await actInt.showModal(modal);
-
-                    const modalInt = await actInt.awaitModalSubmit({ filter: i => i.customId === `status_text_${mTs}`, time: CONFIG.COLLECTOR_TIMEOUT });
-                    const statusText = modalInt.fields.getTextInputValue('status_text');
-
-                    let streamUrl = null;
-                    if (actType === 'streaming') {
-                        await modalInt.update({
-                            embeds: [makeEmbed(guild, { author: '🔴 Streaming', color: CONFIG.COLORS.GOLD, description: `النص: **${statusText}**\n\nالحين نحتاج رابط البث...` })],
-                            components: []
-                        });
-
-                        const urlResp = await collectText(message.channel, message.author.id, '🔴 أرسل **رابط البث** (Twitch أو YouTube):', guild);
-                        if (!urlResp) return;
-                        streamUrl = urlResp.content.trim();
-
-                        const typeMap = { playing: ActivityType.Playing, watching: ActivityType.Watching, listening: ActivityType.Listening, competing: ActivityType.Competing, streaming: ActivityType.Streaming, custom: ActivityType.Custom };
-                        client.user.setPresence({
-                            activities: [{ name: statusText, type: typeMap[actType], url: streamUrl }],
-                            status: client.user.presence?.status || 'online'
-                        });
-
-                        await message.channel.send({
-                            embeds: [successEmbed(guild, `تم تحديث الستاتس\n\n**النوع:** Streaming 🔴\n**النص:** ${statusText}\n**الرابط:** ${streamUrl}`)]
-                        });
-                        await sendLog(guild.id, CONFIG.COLORS.INFO, 'تغيير ستاتس البوت', `النوع: **Streaming** | النص: **${statusText}** | الرابط: ${streamUrl}`, message.author.id);
-                        return;
-                    }
-
-                    const tsSt = uid();
-                    const stMenu = new StringSelectMenuBuilder().setCustomId(`st_${tsSt}`).setPlaceholder('الحالة...')
-                        .addOptions([
-                            { label: 'Online', value: 'online', emoji: '🟢' },
-                            { label: 'DND', value: 'dnd', emoji: '🔴' },
-                            { label: 'Idle', value: 'idle', emoji: '🟡' },
-                            { label: 'Invisible', value: 'invisible', emoji: '⚫' }
-                        ]);
-
-                    await modalInt.update({
-                        embeds: [makeEmbed(guild, { author: '🎯 اختر الحالة', color: CONFIG.COLORS.GOLD, description: `النوع: **${actType}** | النص: **${statusText}**` })],
-                        components: [new ActionRowBuilder().addComponents(stMenu)]
-                    });
-
-                    const stInt = await message.channel.awaitMessageComponent({
-                        filter: i => i.user.id === message.author.id && i.customId === `st_${tsSt}`,
-                        componentType: ComponentType.StringSelect, time: CONFIG.COLLECTOR_TIMEOUT
-                    });
-
-                    const statusType = stInt.values[0];
-                    const typeMap = { playing: ActivityType.Playing, watching: ActivityType.Watching, listening: ActivityType.Listening, competing: ActivityType.Competing, streaming: ActivityType.Streaming, custom: ActivityType.Custom };
-                    client.user.setPresence({ activities: [{ name: statusText, type: typeMap[actType] }], status: statusType });
-
-                    await stInt.update({
-                        embeds: [successEmbed(guild, `تم تحديث الستاتس\n\n**النوع:** ${actType}\n**النص:** ${statusText}\n**الحالة:** ${statusType}`)],
-                        components: []
-                    });
-                    await sendLog(guild.id, CONFIG.COLORS.INFO, 'تغيير ستاتس البوت', `النوع: **${actType}** | النص: **${statusText}** | الحالة: **${statusType}**`, message.author.id);
-                } catch { }
-            }
-
-            else if (choice === 'presence') {
-                const tsP = uid();
-                const presenceMenu = new StringSelectMenuBuilder()
-                    .setCustomId(`pres_${tsP}`)
-                    .setPlaceholder('اختر الحالة...')
-                    .addOptions([
-                        { label: 'Online', value: 'online', emoji: '🟢' },
-                        { label: 'DND', value: 'dnd', emoji: '🔴' },
-                        { label: 'Idle', value: 'idle', emoji: '🟡' },
-                        { label: 'Invisible', value: 'invisible', emoji: '⚫' }
-                    ]);
-
-                await admInt.update({
-                    embeds: [makeEmbed(guild, { author: '🟢 تغيير الحالة', color: CONFIG.COLORS.GOLD, description: 'اختر الحالة الجديدة:\n\n*الأكتيفيتي الحالية ما بتتغير*' })],
-                    components: [new ActionRowBuilder().addComponents(presenceMenu)]
-                });
-
-                try {
-                    const presInt = await message.channel.awaitMessageComponent({
-                        filter: i => i.user.id === message.author.id && i.customId === `pres_${tsP}`,
-                        componentType: ComponentType.StringSelect, time: CONFIG.COLLECTOR_TIMEOUT
-                    });
-
-                    const newStatus = presInt.values[0];
-                    const currentActivities = client.user.presence?.activities || [];
-                    client.user.setPresence({
-                        activities: currentActivities.length > 0 ? currentActivities : [],
-                        status: newStatus
-                    });
-
-                    const statusLabels = { online: '🟢 Online', dnd: '🔴 DND', idle: '🟡 Idle', invisible: '⚫ Invisible' };
-
-                    await presInt.update({
-                        embeds: [successEmbed(guild, `تم تغيير الحالة إلى: **${statusLabels[newStatus]}**`)],
-                        components: []
-                    });
-                    await sendLog(guild.id, CONFIG.COLORS.INFO, 'تغيير حالة البوت', `الحالة: **${statusLabels[newStatus]}**`, message.author.id);
-                } catch { }
-            }
-
-            else if (choice === 'add') {
-                await admInt.update({ embeds: [makeEmbed(guild, { author: '➕ إضافة Admin', color: CONFIG.COLORS.GOLD })], components: [] });
-                const resp = await collectText(message.channel, message.author.id, '👤 اكتب آيدي المستخدم أو سوله منشن:', guild);
-                if (!resp) return;
-                let targetId = resp.content.replace(/[<@!>]/g, '').trim();
-                if (!/^\d{17,19}$/.test(targetId)) return message.channel.send({ embeds: [errorEmbed(guild, 'آيدي غير صالح')] });
-                try { const user = await client.users.fetch(targetId); if (user.bot) return message.channel.send({ embeds: [errorEmbed(guild, 'ما ينفع تضيف بوت')] }); } catch { return message.channel.send({ embeds: [errorEmbed(guild, 'ما لقيت هالمستخدم')] }); }
-                const gd = getGuild(guild.id);
-                if (gd.admins.includes(targetId)) return message.channel.send({ embeds: [makeEmbed(guild, { author: '⚠️ موجود', color: CONFIG.COLORS.WARNING, description: 'هالمستخدم أدمن بالفعل' })] });
-                gd.admins.push(targetId); saveGuild(guild.id, gd);
-                await message.channel.send({ embeds: [successEmbed(guild, `🟢 تم إضافة <@${targetId}> كأدمن`)] });
-                await sendLog(guild.id, CONFIG.COLORS.INFO, 'إضافة أدمن', `<@${targetId}> \`${targetId}\``, message.author.id);
-            }
-
-            else if (choice === 'remove') {
-                const gd = getGuild(guild.id);
-                if (gd.admins.length === 0) return admInt.update({ embeds: [makeEmbed(guild, { author: '📋 الأدمنز', color: CONFIG.COLORS.PRIMARY, description: '📭 ما في أدمنز حالياً' })], components: [] });
-                await admInt.update({ embeds: [makeEmbed(guild, { author: '➖ حذف Admin', color: CONFIG.COLORS.GOLD })], components: [] });
-                const resp = await collectText(message.channel, message.author.id, '👤 اكتب آيدي الأدمن أو سوله منشن:', guild);
-                if (!resp) return;
-                let removeId = resp.content.replace(/[<@!>]/g, '').trim();
-                if (!gd.admins.includes(removeId)) return message.channel.send({ embeds: [errorEmbed(guild, 'هالمستخدم مو أدمن')] });
-                gd.admins = gd.admins.filter(id => id !== removeId); saveGuild(guild.id, gd);
-                await message.channel.send({ embeds: [successEmbed(guild, `🔴 تم حذف <@${removeId}> من الأدمنز`)] });
-                await sendLog(guild.id, CONFIG.COLORS.INFO, 'حذف أدمن', `<@${removeId}> \`${removeId}\``, message.author.id);
-            }
-
-            else if (choice === 'add_owner') {
-                await admInt.update({ embeds: [makeEmbed(guild, { author: '👑 إضافة Owner', color: CONFIG.COLORS.GOLD })], components: [] });
-                const resp = await collectText(message.channel, message.author.id, '👑 اكتب آيدي المستخدم أو سوله منشن:', guild);
-                if (!resp) return;
-                let targetId = resp.content.replace(/[<@!>]/g, '').trim();
-                if (!/^\d{17,19}$/.test(targetId)) return message.channel.send({ embeds: [errorEmbed(guild, 'آيدي غير صالح')] });
-                if (targetId === CONFIG.OWNER_ID) return message.channel.send({ embeds: [makeEmbed(guild, { author: '⚠️ موجود', color: CONFIG.COLORS.WARNING, description: 'هذا المالك الأصلي — بالفعل Owner!' })] });
-                try { const user = await client.users.fetch(targetId); if (user.bot) return message.channel.send({ embeds: [errorEmbed(guild, 'ما ينفع تضيف بوت')] }); } catch { return message.channel.send({ embeds: [errorEmbed(guild, 'ما لقيت هالمستخدم')] }); }
-                const gd = getGuild(guild.id);
-                if (gd.owners.includes(targetId)) return message.channel.send({ embeds: [makeEmbed(guild, { author: '⚠️ موجود', color: CONFIG.COLORS.WARNING, description: 'هالمستخدم Owner بالفعل' })] });
-                gd.owners.push(targetId); saveGuild(guild.id, gd);
-                await message.channel.send({ embeds: [successEmbed(guild, `👑 تم إضافة <@${targetId}> كـ Owner`)] });
-                await sendLog(guild.id, CONFIG.COLORS.GOLD, 'إضافة Owner', `👑 <@${targetId}> \`${targetId}\``, message.author.id);
-            }
-
-            else if (choice === 'remove_owner') {
-                const gd = getGuild(guild.id);
-                if (gd.owners.length === 0) return admInt.update({ embeds: [makeEmbed(guild, { author: '👑 الـ Owners', color: CONFIG.COLORS.PRIMARY, description: '📭 ما في Owners مضافين (بس المالك الأصلي)' })], components: [] });
-                await admInt.update({ embeds: [makeEmbed(guild, { author: '🗑️ حذف Owner', color: CONFIG.COLORS.GOLD })], components: [] });
-                const resp = await collectText(message.channel, message.author.id, '👑 اكتب آيدي الـ Owner اللي تبي تحذفه:', guild);
-                if (!resp) return;
-                let removeId = resp.content.replace(/[<@!>]/g, '').trim();
-                if (removeId === CONFIG.OWNER_ID) return message.channel.send({ embeds: [errorEmbed(guild, '❌ ما ينفع تحذف المالك الأصلي!')] });
-                if (!gd.owners.includes(removeId)) return message.channel.send({ embeds: [errorEmbed(guild, 'هالمستخدم مو في قائمة الـ Owners')] });
-                gd.owners = gd.owners.filter(id => id !== removeId); saveGuild(guild.id, gd);
-                await message.channel.send({ embeds: [successEmbed(guild, `🗑️ تم حذف <@${removeId}> من الـ Owners`)] });
-                await sendLog(guild.id, CONFIG.COLORS.GOLD, 'حذف Owner', `🗑️ <@${removeId}> \`${removeId}\``, message.author.id);
-            }
-
-            else if (choice === 'list') {
-                const gd = getGuild(guild.id);
-                const admins = gd.admins;
-                const owners = gd.owners || [];
-                const fields = [];
-                fields.push({ name: '👑 المالك الأصلي', value: `<@${CONFIG.OWNER_ID}>\n\`${CONFIG.OWNER_ID}\``, inline: true });
-                if (owners.length > 0) {
-                    owners.forEach((id, i) => {
-                        fields.push({ name: `👑 Owner #${i + 1}`, value: `<@${id}>\n\`${id}\``, inline: true });
-                    });
-                }
-                fields.push({ name: '\u200b', value: '─'.repeat(30), inline: false });
-                if (admins.length === 0) {
-                    fields.push({ name: '🛡️ الأدمنز', value: '📭 لا يوجد', inline: true });
-                } else {
-                    admins.forEach((id, i) => {
-                        fields.push({ name: `🛡️ أدمن #${i + 1}`, value: `<@${id}>\n\`${id}\``, inline: true });
-                    });
-                }
-                await admInt.update({
-                    embeds: [makeEmbed(guild, {
-                        author: `📋 الأدمنز والـ Owners — ${1 + owners.length + admins.length}`,
-                        color: CONFIG.COLORS.GOLD, fields
-                    })],
-                    components: []
-                });
-            }
-
-        } catch {
-            adminMsg.edit({ embeds: [errorEmbed(guild, 'انتهى الوقت')], components: [] }).catch(() => { });
-        }
+            if (choice === 'name') { const mTs = uid(); const modal = new ModalBuilder().setCustomId(`adm_name_${mTs}`).setTitle('تغيير اسم البوت'); modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('new_name').setLabel('الاسم الجديد').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(32).setValue(client.user.username))); await admInt.showModal(modal); try { const modalInt = await admInt.awaitModalSubmit({ filter: i => i.customId === `adm_name_${mTs}`, time: CONFIG.COLLECTOR_TIMEOUT }); const newName = modalInt.fields.getTextInputValue('new_name'); const oldName = client.user.username; try { await client.user.setUsername(newName); await modalInt.update({ embeds: [successEmbed(guild, `تم تغيير الاسم: **${oldName}** → **${newName}**`)], components: [] }); await sendLog(guild.id, CONFIG.COLORS.INFO, 'تغيير اسم البوت', `**${oldName}** → **${newName}**`, message.author.id); } catch (err) { await modalInt.update({ embeds: [errorEmbed(guild, `فشل: ${err.message}\n\`تغيير الاسم محدود بمرتين/ساعة\``)], components: [] }); } } catch { } }
+            else if (choice === 'avatar') { await admInt.update({ embeds: [makeEmbed(guild, { author: '🖼️ تغيير الصورة', color: CONFIG.COLORS.GOLD })], components: [] }); const resp = await collectText(message.channel, message.author.id, '🖼️ أرسل الصورة الجديدة — رابط أو ارفق ملف:', guild); if (!resp) return; const url = extractImage(resp); if (!url) return message.channel.send({ embeds: [errorEmbed(guild, 'ما لقيت صورة صالحة')] }); try { await client.user.setAvatar(url); await message.channel.send({ embeds: [successEmbed(guild, 'تم تغيير صورة البوت')] }); await sendLog(guild.id, CONFIG.COLORS.INFO, 'تغيير صورة البوت', null, message.author.id); } catch (err) { await message.channel.send({ embeds: [errorEmbed(guild, `فشل: ${err.message}`)] }); } }
+            else if (choice === 'banner') { await admInt.update({ embeds: [makeEmbed(guild, { author: '🏞️ تغيير البنر', color: CONFIG.COLORS.GOLD, description: '⚠️ البنر يحتاج البوت يكون عنده Nitro أو مطور تطبيقات نشط' })], components: [] }); const resp = await collectText(message.channel, message.author.id, '🏞️ أرسل صورة البنر — رابط أو ارفق ملف:', guild); if (!resp) return; const url = extractImage(resp); if (!url) return message.channel.send({ embeds: [errorEmbed(guild, 'ما لقيت صورة صالحة')] }); try { await message.channel.send({ embeds: [makeEmbed(guild, { author: '⏳ جاري تحميل وتطبيق البنر...', color: CONFIG.COLORS.INFO })] }); const dataURI = await fetchImageAsBase64(url); await client.rest.patch('/users/@me', { body: { banner: dataURI } }); await message.channel.send({ embeds: [successEmbed(guild, '✅ تم تغيير بنر البوت بنجاح!')] }); await sendLog(guild.id, CONFIG.COLORS.INFO, 'تغيير بنر البوت', null, message.author.id); } catch (err) { let errorMsg = `فشل تغيير البنر: ${err.message}`; if (err.message?.includes('BASE_TYPE_BAD_LENGTH') || err.code === 50006) errorMsg = '❌ فشل تغيير البنر — تأكد إن الصورة صالحة وحجمها مناسب'; else if (err.status === 400) errorMsg = '❌ فشل — البوت قد ما يدعم البنر'; await message.channel.send({ embeds: [errorEmbed(guild, errorMsg)] }); } }
+            else if (choice === 'bio') { const mTs = uid(); const modal = new ModalBuilder().setCustomId(`adm_bio_${mTs}`).setTitle('تغيير البايو'); modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('new_bio').setLabel('البايو الجديد').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(190))); await admInt.showModal(modal); try { const modalInt = await admInt.awaitModalSubmit({ filter: i => i.customId === `adm_bio_${mTs}`, time: CONFIG.COLLECTOR_TIMEOUT }); const newBio = modalInt.fields.getTextInputValue('new_bio'); try { await client.rest.patch('/users/@me', { body: { bio: newBio } }); await modalInt.update({ embeds: [successEmbed(guild, `تم تحديث البايو:\n> ${newBio}`)], components: [] }); await sendLog(guild.id, CONFIG.COLORS.INFO, 'تغيير بايو البوت', newBio, message.author.id); } catch (err) { await modalInt.update({ embeds: [errorEmbed(guild, `فشل: ${err.message}`)], components: [] }); } } catch { } }
+            else if (choice === 'status') { const tsAct = uid(); const actMenu = new StringSelectMenuBuilder().setCustomId(`act_${tsAct}`).setPlaceholder('نوع الأكتيفيتي...').addOptions([{ label: 'Playing', value: 'playing', emoji: '🎮' }, { label: 'Watching', value: 'watching', emoji: '👁️' }, { label: 'Listening', value: 'listening', emoji: '🎧' }, { label: 'Competing', value: 'competing', emoji: '🏅' }, { label: 'Streaming', value: 'streaming', emoji: '🔴' }, { label: 'Custom', value: 'custom', emoji: '💫' }]); await admInt.update({ embeds: [makeEmbed(guild, { author: '🎯 نوع الأكتيفيتي', color: CONFIG.COLORS.GOLD, description: 'اختر النوع:' })], components: [new ActionRowBuilder().addComponents(actMenu)] }); try { const actInt = await message.channel.awaitMessageComponent({ filter: i => i.user.id === message.author.id && i.customId === `act_${tsAct}`, componentType: ComponentType.StringSelect, time: CONFIG.COLLECTOR_TIMEOUT }); const actType = actInt.values[0]; const mTs = uid(); const modal = new ModalBuilder().setCustomId(`status_text_${mTs}`).setTitle('نص الأكتيفيتي'); modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('status_text').setLabel('النص').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(128))); await actInt.showModal(modal); const modalInt = await actInt.awaitModalSubmit({ filter: i => i.customId === `status_text_${mTs}`, time: CONFIG.COLLECTOR_TIMEOUT }); const statusText = modalInt.fields.getTextInputValue('status_text'); if (actType === 'streaming') { await modalInt.update({ embeds: [makeEmbed(guild, { author: '🔴 Streaming', color: CONFIG.COLORS.GOLD, description: `النص: **${statusText}**\n\nالحين نحتاج رابط البث...` })], components: [] }); const urlResp = await collectText(message.channel, message.author.id, '🔴 أرسل **رابط البث** (Twitch أو YouTube):', guild); if (!urlResp) return; const streamUrl = urlResp.content.trim(); const typeMap = { playing: ActivityType.Playing, watching: ActivityType.Watching, listening: ActivityType.Listening, competing: ActivityType.Competing, streaming: ActivityType.Streaming, custom: ActivityType.Custom }; client.user.setPresence({ activities: [{ name: statusText, type: typeMap[actType], url: streamUrl }], status: client.user.presence?.status || 'online' }); await message.channel.send({ embeds: [successEmbed(guild, `تم تحديث الستاتس\n\n**النوع:** Streaming 🔴\n**النص:** ${statusText}\n**الرابط:** ${streamUrl}`)] }); await sendLog(guild.id, CONFIG.COLORS.INFO, 'تغيير ستاتس البوت', `النوع: **Streaming** | النص: **${statusText}** | الرابط: ${streamUrl}`, message.author.id); return; } const tsSt = uid(); const stMenu = new StringSelectMenuBuilder().setCustomId(`st_${tsSt}`).setPlaceholder('الحالة...').addOptions([{ label: 'Online', value: 'online', emoji: '🟢' }, { label: 'DND', value: 'dnd', emoji: '🔴' }, { label: 'Idle', value: 'idle', emoji: '🟡' }, { label: 'Invisible', value: 'invisible', emoji: '⚫' }]); await modalInt.update({ embeds: [makeEmbed(guild, { author: '🎯 اختر الحالة', color: CONFIG.COLORS.GOLD, description: `النوع: **${actType}** | النص: **${statusText}**` })], components: [new ActionRowBuilder().addComponents(stMenu)] }); const stInt = await message.channel.awaitMessageComponent({ filter: i => i.user.id === message.author.id && i.customId === `st_${tsSt}`, componentType: ComponentType.StringSelect, time: CONFIG.COLLECTOR_TIMEOUT }); const statusType = stInt.values[0]; const typeMap = { playing: ActivityType.Playing, watching: ActivityType.Watching, listening: ActivityType.Listening, competing: ActivityType.Competing, streaming: ActivityType.Streaming, custom: ActivityType.Custom }; client.user.setPresence({ activities: [{ name: statusText, type: typeMap[actType] }], status: statusType }); await stInt.update({ embeds: [successEmbed(guild, `تم تحديث الستاتس\n\n**النوع:** ${actType}\n**النص:** ${statusText}\n**الحالة:** ${statusType}`)], components: [] }); await sendLog(guild.id, CONFIG.COLORS.INFO, 'تغيير ستاتس البوت', `النوع: **${actType}** | النص: **${statusText}** | الحالة: **${statusType}**`, message.author.id); } catch { } }
+            else if (choice === 'presence') { const tsP = uid(); const presenceMenu = new StringSelectMenuBuilder().setCustomId(`pres_${tsP}`).setPlaceholder('اختر الحالة...').addOptions([{ label: 'Online', value: 'online', emoji: '🟢' }, { label: 'DND', value: 'dnd', emoji: '🔴' }, { label: 'Idle', value: 'idle', emoji: '🟡' }, { label: 'Invisible', value: 'invisible', emoji: '⚫' }]); await admInt.update({ embeds: [makeEmbed(guild, { author: '🟢 تغيير الحالة', color: CONFIG.COLORS.GOLD, description: 'اختر الحالة الجديدة:\n\n*الأكتيفيتي الحالية ما بتتغير*' })], components: [new ActionRowBuilder().addComponents(presenceMenu)] }); try { const presInt = await message.channel.awaitMessageComponent({ filter: i => i.user.id === message.author.id && i.customId === `pres_${tsP}`, componentType: ComponentType.StringSelect, time: CONFIG.COLLECTOR_TIMEOUT }); const newStatus = presInt.values[0]; const currentActivities = client.user.presence?.activities || []; client.user.setPresence({ activities: currentActivities.length > 0 ? currentActivities : [], status: newStatus }); const statusLabels = { online: '🟢 Online', dnd: '🔴 DND', idle: '🟡 Idle', invisible: '⚫ Invisible' }; await presInt.update({ embeds: [successEmbed(guild, `تم تغيير الحالة إلى: **${statusLabels[newStatus]}**`)], components: [] }); await sendLog(guild.id, CONFIG.COLORS.INFO, 'تغيير حالة البوت', `الحالة: **${statusLabels[newStatus]}**`, message.author.id); } catch { } }
+            else if (choice === 'add') { await admInt.update({ embeds: [makeEmbed(guild, { author: '➕ إضافة Admin', color: CONFIG.COLORS.GOLD })], components: [] }); const resp = await collectText(message.channel, message.author.id, '👤 اكتب آيدي المستخدم أو سوله منشن:', guild); if (!resp) return; let targetId = resp.content.replace(/[<@!>]/g, '').trim(); if (!/^\d{17,19}$/.test(targetId)) return message.channel.send({ embeds: [errorEmbed(guild, 'آيدي غير صالح')] }); try { const user = await client.users.fetch(targetId); if (user.bot) return message.channel.send({ embeds: [errorEmbed(guild, 'ما ينفع تضيف بوت')] }); } catch { return message.channel.send({ embeds: [errorEmbed(guild, 'ما لقيت هالمستخدم')] }); } const gd = getGuild(guild.id); if (gd.admins.includes(targetId)) return message.channel.send({ embeds: [makeEmbed(guild, { author: '⚠️ موجود', color: CONFIG.COLORS.WARNING, description: 'هالمستخدم أدمن بالفعل' })] }); gd.admins.push(targetId); saveGuild(guild.id, gd); await message.channel.send({ embeds: [successEmbed(guild, `🟢 تم إضافة <@${targetId}> كأدمن`)] }); await sendLog(guild.id, CONFIG.COLORS.INFO, 'إضافة أدمن', `<@${targetId}> \`${targetId}\``, message.author.id); }
+            else if (choice === 'remove') { const gd = getGuild(guild.id); if (gd.admins.length === 0) return admInt.update({ embeds: [makeEmbed(guild, { author: '📋 الأدمنز', color: CONFIG.COLORS.PRIMARY, description: '📭 ما في أدمنز حالياً' })], components: [] }); await admInt.update({ embeds: [makeEmbed(guild, { author: '➖ حذف Admin', color: CONFIG.COLORS.GOLD })], components: [] }); const resp = await collectText(message.channel, message.author.id, '👤 اكتب آيدي الأدمن أو سوله منشن:', guild); if (!resp) return; let removeId = resp.content.replace(/[<@!>]/g, '').trim(); if (!gd.admins.includes(removeId)) return message.channel.send({ embeds: [errorEmbed(guild, 'هالمستخدم مو أدمن')] }); gd.admins = gd.admins.filter(id => id !== removeId); saveGuild(guild.id, gd); await message.channel.send({ embeds: [successEmbed(guild, `🔴 تم حذف <@${removeId}> من الأدمنز`)] }); await sendLog(guild.id, CONFIG.COLORS.INFO, 'حذف أدمن', `<@${removeId}> \`${removeId}\``, message.author.id); }
+            else if (choice === 'add_owner') { await admInt.update({ embeds: [makeEmbed(guild, { author: '👑 إضافة Owner', color: CONFIG.COLORS.GOLD })], components: [] }); const resp = await collectText(message.channel, message.author.id, '👑 اكتب آيدي المستخدم أو سوله منشن:', guild); if (!resp) return; let targetId = resp.content.replace(/[<@!>]/g, '').trim(); if (!/^\d{17,19}$/.test(targetId)) return message.channel.send({ embeds: [errorEmbed(guild, 'آيدي غير صالح')] }); if (targetId === CONFIG.OWNER_ID) return message.channel.send({ embeds: [makeEmbed(guild, { author: '⚠️ موجود', color: CONFIG.COLORS.WARNING, description: 'هذا المالك الأصلي — بالفعل Owner!' })] }); try { const user = await client.users.fetch(targetId); if (user.bot) return message.channel.send({ embeds: [errorEmbed(guild, 'ما ينفع تضيف بوت')] }); } catch { return message.channel.send({ embeds: [errorEmbed(guild, 'ما لقيت هالمستخدم')] }); } const gd = getGuild(guild.id); if (gd.owners.includes(targetId)) return message.channel.send({ embeds: [makeEmbed(guild, { author: '⚠️ موجود', color: CONFIG.COLORS.WARNING, description: 'هالمستخدم Owner بالفعل' })] }); gd.owners.push(targetId); saveGuild(guild.id, gd); await message.channel.send({ embeds: [successEmbed(guild, `👑 تم إضافة <@${targetId}> كـ Owner`)] }); await sendLog(guild.id, CONFIG.COLORS.GOLD, 'إضافة Owner', `👑 <@${targetId}> \`${targetId}\``, message.author.id); }
+            else if (choice === 'remove_owner') { const gd = getGuild(guild.id); if (gd.owners.length === 0) return admInt.update({ embeds: [makeEmbed(guild, { author: '👑 الـ Owners', color: CONFIG.COLORS.PRIMARY, description: '📭 ما في Owners مضافين (بس المالك الأصلي)' })], components: [] }); await admInt.update({ embeds: [makeEmbed(guild, { author: '🗑️ حذف Owner', color: CONFIG.COLORS.GOLD })], components: [] }); const resp = await collectText(message.channel, message.author.id, '👑 اكتب آيدي الـ Owner اللي تبي تحذفه:', guild); if (!resp) return; let removeId = resp.content.replace(/[<@!>]/g, '').trim(); if (removeId === CONFIG.OWNER_ID) return message.channel.send({ embeds: [errorEmbed(guild, '❌ ما ينفع تحذف المالك الأصلي!')] }); if (!gd.owners.includes(removeId)) return message.channel.send({ embeds: [errorEmbed(guild, 'هالمستخدم مو في قائمة الـ Owners')] }); gd.owners = gd.owners.filter(id => id !== removeId); saveGuild(guild.id, gd); await message.channel.send({ embeds: [successEmbed(guild, `🗑️ تم حذف <@${removeId}> من الـ Owners`)] }); await sendLog(guild.id, CONFIG.COLORS.GOLD, 'حذف Owner', `🗑️ <@${removeId}> \`${removeId}\``, message.author.id); }
+            else if (choice === 'list') { const gd = getGuild(guild.id); const admins = gd.admins; const owners = gd.owners || []; const fields = []; fields.push({ name: '👑 المالك الأصلي', value: `<@${CONFIG.OWNER_ID}>\n\`${CONFIG.OWNER_ID}\``, inline: true }); if (owners.length > 0) owners.forEach((id, i) => fields.push({ name: `👑 Owner #${i + 1}`, value: `<@${id}>\n\`${id}\``, inline: true })); fields.push({ name: '\u200b', value: '─'.repeat(30), inline: false }); if (admins.length === 0) fields.push({ name: '🛡️ الأدمنز', value: '📭 لا يوجد', inline: true }); else admins.forEach((id, i) => fields.push({ name: `🛡️ أدمن #${i + 1}`, value: `<@${id}>\n\`${id}\``, inline: true })); await admInt.update({ embeds: [makeEmbed(guild, { author: `📋 الأدمنز والـ Owners — ${1 + owners.length + admins.length}`, color: CONFIG.COLORS.GOLD, fields })], components: [] }); }
+        } catch { adminMsg.edit({ embeds: [errorEmbed(guild, 'انتهى الوقت')], components: [] }).catch(() => { }); }
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1899,58 +1533,11 @@ client.on('messageCreate', async (message) => {
         if (!emojiResp) return;
         const emojiMatch = emojiResp.content.match(/<(a?):(\w+):(\d+)>/);
         if (!emojiMatch) return message.channel.send({ embeds: [errorEmbed(guild, '❌ هذا مو إيموجي مخصص!')] });
-
-        const isAnimated = emojiMatch[1] === 'a';
-        const emojiName = emojiMatch[2];
-        const emojiId = emojiMatch[3];
+        const isAnimated = emojiMatch[1] === 'a'; const emojiName = emojiMatch[2]; const emojiId = emojiMatch[3];
         const emojiUrl = `https://cdn.discordapp.com/emojis/${emojiId}.${isAnimated ? 'gif' : 'png'}?size=128`;
-
         const ts = uid();
-        const confirmMsg = await message.channel.send({
-            embeds: [makeEmbed(guild, {
-                author: '😀 معاينة الإيموجي', color: CONFIG.COLORS.WARNING, thumbnail: emojiUrl, description: 'تأكد من الإيموجي قبل الإضافة:',
-                fields: [
-                    { name: '📌 الاسم', value: `\`${emojiName}\``, inline: true },
-                    { name: '🆔 الآيدي', value: `\`${emojiId}\``, inline: true },
-                    { name: '🎞️ النوع', value: isAnimated ? '🟢 متحرك' : '🔴 ثابت', inline: true }
-                ]
-            })],
-            components: [new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`emoji_yes_${ts}`).setLabel('✅ أضف').setStyle(ButtonStyle.Success),
-                new ButtonBuilder().setCustomId(`emoji_no_${ts}`).setLabel('❌ إلغاء').setStyle(ButtonStyle.Danger)
-            )]
-        });
-
-        try {
-            const int = await confirmMsg.awaitMessageComponent({ filter: i => i.user.id === message.author.id, componentType: ComponentType.Button, time: CONFIG.COLLECTOR_TIMEOUT });
-            if (int.customId === `emoji_yes_${ts}`) {
-                await int.update({ embeds: [makeEmbed(guild, { author: '⏳ جاري الإضافة...', color: CONFIG.COLORS.INFO })], components: [] });
-                try {
-                    const botMember = await guild.members.fetch(client.user.id);
-                    if (!botMember.permissions.has('ManageGuildExpressions')) return message.channel.send({ embeds: [errorEmbed(guild, '🔒 البوت ما عنده صلاحية **Manage Expressions**')] });
-                    const newEmoji = await guild.emojis.create({ attachment: emojiUrl, name: emojiName });
-                    const useCode = newEmoji.animated ? `<a:${newEmoji.name}:${newEmoji.id}>` : `<:${newEmoji.name}:${newEmoji.id}>`;
-                    await message.channel.send({
-                        embeds: [makeEmbed(guild, {
-                            author: '✓ تم إضافة الإيموجي', color: CONFIG.COLORS.SUCCESS, thumbnail: newEmoji.url, description: `${useCode} تم إضافته بنجاح!`,
-                            fields: [
-                                { name: '📌 الاسم', value: `\`${newEmoji.name}\``, inline: true },
-                                { name: '🆔 الآيدي', value: `\`${newEmoji.id}\``, inline: true },
-                                { name: '💬 كود الاستخدام', value: `\`${useCode}\``, inline: true }
-                            ]
-                        })]
-                    });
-                    await sendLog(guild.id, CONFIG.COLORS.SUCCESS, 'إضافة إيموجي', `📌 **${newEmoji.name}** | 🆔 \`${newEmoji.id}\``, message.author.id);
-                } catch (err) {
-                    let errorMsg = `فشل: ${err.message}`;
-                    if (err.code === 30008) errorMsg = '❌ السيرفر وصل الحد الأقصى!';
-                    else if (err.code === 50013) errorMsg = '🔒 صلاحية كافية ما عنده';
-                    await message.channel.send({ embeds: [errorEmbed(guild, errorMsg)] });
-                }
-            } else {
-                await int.update({ embeds: [makeEmbed(guild, { author: '❌ تم الإلغاء', color: CONFIG.COLORS.ERROR })], components: [] });
-            }
-        } catch { confirmMsg.edit({ embeds: [errorEmbed(guild, 'انتهى الوقت')], components: [] }).catch(() => { }); }
+        const confirmMsg = await message.channel.send({ embeds: [makeEmbed(guild, { author: '😀 معاينة الإيموجي', color: CONFIG.COLORS.WARNING, thumbnail: emojiUrl, description: 'تأكد من الإيموجي قبل الإضافة:', fields: [{ name: '📌 الاسم', value: `\`${emojiName}\``, inline: true }, { name: '🆔 الآيدي', value: `\`${emojiId}\``, inline: true }, { name: '🎞️ النوع', value: isAnimated ? '🟢 متحرك' : '🔴 ثابت', inline: true }] })], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`emoji_yes_${ts}`).setLabel('✅ أضف').setStyle(ButtonStyle.Success), new ButtonBuilder().setCustomId(`emoji_no_${ts}`).setLabel('❌ إلغاء').setStyle(ButtonStyle.Danger))] });
+        try { const int = await confirmMsg.awaitMessageComponent({ filter: i => i.user.id === message.author.id, componentType: ComponentType.Button, time: CONFIG.COLLECTOR_TIMEOUT }); if (int.customId === `emoji_yes_${ts}`) { await int.update({ embeds: [makeEmbed(guild, { author: '⏳ جاري الإضافة...', color: CONFIG.COLORS.INFO })], components: [] }); try { const botMember = await guild.members.fetch(client.user.id); if (!botMember.permissions.has('ManageGuildExpressions')) return message.channel.send({ embeds: [errorEmbed(guild, '🔒 البوت ما عنده صلاحية **Manage Expressions**')] }); const newEmoji = await guild.emojis.create({ attachment: emojiUrl, name: emojiName }); const useCode = newEmoji.animated ? `<a:${newEmoji.name}:${newEmoji.id}>` : `<:${newEmoji.name}:${newEmoji.id}>`; await message.channel.send({ embeds: [makeEmbed(guild, { author: '✓ تم إضافة الإيموجي', color: CONFIG.COLORS.SUCCESS, thumbnail: newEmoji.url, description: `${useCode} تم إضافته بنجاح!`, fields: [{ name: '📌 الاسم', value: `\`${newEmoji.name}\``, inline: true }, { name: '🆔 الآيدي', value: `\`${newEmoji.id}\``, inline: true }, { name: '💬 كود الاستخدام', value: `\`${useCode}\``, inline: true }] })] }); await sendLog(guild.id, CONFIG.COLORS.SUCCESS, 'إضافة إيموجي', `📌 **${newEmoji.name}** | 🆔 \`${newEmoji.id}\``, message.author.id); } catch (err) { let errorMsg = `فشل: ${err.message}`; if (err.code === 30008) errorMsg = '❌ السيرفر وصل الحد الأقصى!'; else if (err.code === 50013) errorMsg = '🔒 صلاحية كافية ما عنده'; await message.channel.send({ embeds: [errorEmbed(guild, errorMsg)] }); } } else { await int.update({ embeds: [makeEmbed(guild, { author: '❌ تم الإلغاء', color: CONFIG.COLORS.ERROR })], components: [] }); } } catch { confirmMsg.edit({ embeds: [errorEmbed(guild, 'انتهى الوقت')], components: [] }).catch(() => { }); }
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1959,78 +1546,15 @@ client.on('messageCreate', async (message) => {
 
     else if (cmd === 'addcmd') {
         if (!isOwner(message.author.id, guild.id)) return message.reply({ embeds: [errorEmbed(guild, '👑 هذا الأمر خاص بالمالك فقط')] });
-        const gd = getGuild(guild.id);
-        const aliases = gd.aliases || {};
-        const currentAliases = Object.entries(aliases);
+        const gd = getGuild(guild.id); const aliases = gd.aliases || {}; const currentAliases = Object.entries(aliases);
         let aliasListText = currentAliases.length === 0 ? '📭 لا توجد اختصارات' : currentAliases.map(([a, o]) => `\`${CONFIG.PREFIX}${a}\` → \`${CONFIG.PREFIX}${o}\``).join('\n');
-
         const ts = uid();
-        const cmdMenu = new StringSelectMenuBuilder().setCustomId(`addcmd_${ts}`).setPlaceholder('اختر الأمر...')
-            .addOptions([
-                { label: 'broadcast', value: 'broadcast', emoji: '📤' },
-                { label: 'broadcast test', value: 'broadcast test', emoji: '🧪' },
-                { label: 'scheduled', value: 'scheduled', emoji: '⏰' },
-                { label: 'resend', value: 'resend', emoji: '🔄' },
-                { label: 'stats', value: 'stats', emoji: '📊' },
-                { label: 'help', value: 'help', emoji: '📖' },
-                { label: 'admin', value: 'admin', emoji: '⚙️' },
-                { label: 'setlog', value: 'setlog', emoji: '📋' },
-                { label: 'addemoji', value: 'addemoji', emoji: '😀' },
-                { label: 'addcmd', value: 'addcmd', emoji: '🔗' },
-                { label: 'remind', value: 'remind', emoji: '🔔' },
-                { label: 'reminders', value: 'reminders', emoji: '📋' }
-            ]);
-
+        const cmdMenu = new StringSelectMenuBuilder().setCustomId(`addcmd_${ts}`).setPlaceholder('اختر الأمر...').addOptions([{ label: 'broadcast', value: 'broadcast', emoji: '📤' }, { label: 'broadcast test', value: 'broadcast test', emoji: '🧪' }, { label: 'scheduled', value: 'scheduled', emoji: '⏰' }, { label: 'resend', value: 'resend', emoji: '🔄' }, { label: 'stats', value: 'stats', emoji: '📊' }, { label: 'help', value: 'help', emoji: '📖' }, { label: 'admin', value: 'admin', emoji: '⚙️' }, { label: 'setlog', value: 'setlog', emoji: '📋' }, { label: 'addemoji', value: 'addemoji', emoji: '😀' }, { label: 'addcmd', value: 'addcmd', emoji: '🔗' }, { label: 'remind', value: 'remind', emoji: '🔔' }, { label: 'reminders', value: 'reminders', emoji: '📋' }]);
         const components = [new ActionRowBuilder().addComponents(cmdMenu)];
-        if (currentAliases.length > 0) {
-            const tsD = uid();
-            components.push(new ActionRowBuilder().addComponents(
-                new StringSelectMenuBuilder().setCustomId(`delcmd_${tsD}`).setPlaceholder('🗑️ أو احذف اختصار...')
-                    .addOptions(currentAliases.map(([a, o]) => ({ label: `حذف: ${a}`, description: `→ ${o}`, value: a, emoji: '🗑️' })))
-            ));
-        }
-
-        const addcmdMsg = await message.reply({
-            embeds: [makeEmbed(guild, { author: '🔗 إدارة الاختصارات', color: CONFIG.COLORS.GOLD, description: `**الاختصارات الحالية:**\n${aliasListText}` })],
-            components
-        });
-
+        if (currentAliases.length > 0) { const tsD = uid(); components.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`delcmd_${tsD}`).setPlaceholder('🗑️ أو احذف اختصار...').addOptions(currentAliases.map(([a, o]) => ({ label: `حذف: ${a}`, description: `→ ${o}`, value: a, emoji: '🗑️' }))))); }
+        const addcmdMsg = await message.reply({ embeds: [makeEmbed(guild, { author: '🔗 إدارة الاختصارات', color: CONFIG.COLORS.GOLD, description: `**الاختصارات الحالية:**\n${aliasListText}` })], components });
         const collector = addcmdMsg.createMessageComponentCollector({ filter: i => i.user.id === message.author.id, componentType: ComponentType.StringSelect, time: CONFIG.COLLECTOR_TIMEOUT });
-        collector.on('collect', async (int) => {
-            if (int.customId.startsWith('delcmd_')) {
-                const aliasDel = int.values[0];
-                const freshGd = getGuild(guild.id);
-                if (freshGd.aliases?.[aliasDel]) {
-                    const orig = freshGd.aliases[aliasDel]; delete freshGd.aliases[aliasDel]; saveGuild(guild.id, freshGd);
-                    await int.update({ embeds: [successEmbed(guild, `🗑️ تم حذف: \`${CONFIG.PREFIX}${aliasDel}\` → \`${CONFIG.PREFIX}${orig}\``)], components: [] });
-                    await sendLog(guild.id, CONFIG.COLORS.WARNING, 'حذف اختصار', `🗑️ \`${CONFIG.PREFIX}${aliasDel}\``, message.author.id);
-                }
-                collector.stop(); return;
-            }
-            const selectedCmd = int.values[0];
-            await int.update({ embeds: [makeEmbed(guild, { author: '🔗 إضافة اختصار', color: CONFIG.COLORS.INFO, description: `الأمر: \`${CONFIG.PREFIX}${selectedCmd}\`` })], components: [] });
-            collector.stop();
-            const aliasResp = await collectText(message.channel, message.author.id, `✏️ اكتب **الاختصار** بدون \`${CONFIG.PREFIX}\`:`, guild);
-            if (!aliasResp) return;
-            const newAlias = aliasResp.content.trim().toLowerCase();
-            if (newAlias.includes(' ')) return message.channel.send({ embeds: [errorEmbed(guild, 'كلمة وحدة بدون مسافات')] });
-            if (newAlias.length < 1 || newAlias.length > 20) return message.channel.send({ embeds: [errorEmbed(guild, 'بين 1 و 20 حرف')] });
-            if (CONFIG.ORIGINAL_COMMANDS.includes(newAlias)) return message.channel.send({ embeds: [errorEmbed(guild, `\`${newAlias}\` أمر أصلي!`)] });
-            const freshGd = getGuild(guild.id);
-            if (!freshGd.aliases) freshGd.aliases = {};
-            if (freshGd.aliases[newAlias]) return message.channel.send({ embeds: [errorEmbed(guild, `\`${newAlias}\` مستخدم بالفعل`)] });
-            freshGd.aliases[newAlias] = selectedCmd; saveGuild(guild.id, freshGd);
-            await message.channel.send({
-                embeds: [makeEmbed(guild, {
-                    author: '✓ تم إضافة الاختصار', color: CONFIG.COLORS.SUCCESS,
-                    fields: [
-                        { name: '🔗 الاختصار', value: `\`${CONFIG.PREFIX}${newAlias}\``, inline: true },
-                        { name: '📌 الأصلي', value: `\`${CONFIG.PREFIX}${selectedCmd}\``, inline: true }
-                    ]
-                })]
-            });
-            await sendLog(guild.id, CONFIG.COLORS.INFO, 'إضافة اختصار', `🔗 \`${CONFIG.PREFIX}${newAlias}\` → \`${CONFIG.PREFIX}${selectedCmd}\``, message.author.id);
-        });
+        collector.on('collect', async (int) => { if (int.customId.startsWith('delcmd_')) { const aliasDel = int.values[0]; const freshGd = getGuild(guild.id); if (freshGd.aliases?.[aliasDel]) { const orig = freshGd.aliases[aliasDel]; delete freshGd.aliases[aliasDel]; saveGuild(guild.id, freshGd); await int.update({ embeds: [successEmbed(guild, `🗑️ تم حذف: \`${CONFIG.PREFIX}${aliasDel}\` → \`${CONFIG.PREFIX}${orig}\``)], components: [] }); await sendLog(guild.id, CONFIG.COLORS.WARNING, 'حذف اختصار', `🗑️ \`${CONFIG.PREFIX}${aliasDel}\``, message.author.id); } collector.stop(); return; } const selectedCmd = int.values[0]; await int.update({ embeds: [makeEmbed(guild, { author: '🔗 إضافة اختصار', color: CONFIG.COLORS.INFO, description: `الأمر: \`${CONFIG.PREFIX}${selectedCmd}\`` })], components: [] }); collector.stop(); const aliasResp = await collectText(message.channel, message.author.id, `✏️ اكتب **الاختصار** بدون \`${CONFIG.PREFIX}\`:`, guild); if (!aliasResp) return; const newAlias = aliasResp.content.trim().toLowerCase(); if (newAlias.includes(' ')) return message.channel.send({ embeds: [errorEmbed(guild, 'كلمة وحدة بدون مسافات')] }); if (newAlias.length < 1 || newAlias.length > 20) return message.channel.send({ embeds: [errorEmbed(guild, 'بين 1 و 20 حرف')] }); if (CONFIG.ORIGINAL_COMMANDS.includes(newAlias)) return message.channel.send({ embeds: [errorEmbed(guild, `\`${newAlias}\` أمر أصلي!`)] }); const freshGd = getGuild(guild.id); if (!freshGd.aliases) freshGd.aliases = {}; if (freshGd.aliases[newAlias]) return message.channel.send({ embeds: [errorEmbed(guild, `\`${newAlias}\` مستخدم بالفعل`)] }); freshGd.aliases[newAlias] = selectedCmd; saveGuild(guild.id, freshGd); await message.channel.send({ embeds: [makeEmbed(guild, { author: '✓ تم إضافة الاختصار', color: CONFIG.COLORS.SUCCESS, fields: [{ name: '🔗 الاختصار', value: `\`${CONFIG.PREFIX}${newAlias}\``, inline: true }, { name: '📌 الأصلي', value: `\`${CONFIG.PREFIX}${selectedCmd}\``, inline: true }] })] }); await sendLog(guild.id, CONFIG.COLORS.INFO, 'إضافة اختصار', `🔗 \`${CONFIG.PREFIX}${newAlias}\` → \`${CONFIG.PREFIX}${selectedCmd}\``, message.author.id); });
         collector.on('end', async (_, reason) => { if (reason === 'time') try { await addcmdMsg.edit({ components: [] }); } catch { } });
     }
 
@@ -2040,31 +1564,9 @@ client.on('messageCreate', async (message) => {
 
     else if (cmd === 'owner') {
         if (!isOwner(message.author.id, guild.id)) return message.reply({ embeds: [errorEmbed(guild, '👑 هذا الأمر خاص بالمالك فقط')] });
-
-        const guilds = client.guilds.cache;
-        const data = loadData();
-        let totalBc = 0, totalMem = 0;
-        const guildFields = [];
-        guilds.forEach(g => {
-            const gd = data[g.id]; const bc = gd?.stats?.totalBroadcasts || 0; totalBc += bc; totalMem += g.memberCount;
-            guildFields.push({ name: g.name, value: `👥 \`${g.memberCount}\` | 📢 \`${bc}\` | 🛡️ \`${gd?.admins?.length || 0}\` | 👑 \`${(gd?.owners?.length || 0) + 1}\` | 🔔 ${gd?.logChannelId ? '🟢' : '🔴'}`, inline: false });
-        });
-
-        await message.reply({
-            embeds: [makeEmbed(guild, {
-                author: '👑 لوحة تحكم المالك', authorIcon: client.user.displayAvatarURL({ dynamic: true }),
-                color: CONFIG.COLORS.GOLD, thumbnail: client.user.displayAvatarURL({ dynamic: true }),
-                fields: [
-                    { name: '🖥️ السيرفرات', value: `\`${guilds.size}\``, inline: true },
-                    { name: '👥 إجمالي الأعضاء', value: `\`${totalMem}\``, inline: true },
-                    { name: '📢 إجمالي البرودكاست', value: `\`${totalBc}\``, inline: true },
-                    { name: '⚡ البينق', value: `\`${client.ws.ping}ms\``, inline: true },
-                    { name: '⏱️ وقت التشغيل', value: `\`${formatUptime(client.uptime)}\``, inline: true },
-                    { name: '📦 الإصدار', value: '`v2.1.0`', inline: true },
-                    ...guildFields
-                ]
-            })]
-        });
+        const guilds = client.guilds.cache; const data = loadData(); let totalBc = 0, totalMem = 0; const guildFields = [];
+        guilds.forEach(g => { const gd = data[g.id]; const bc = gd?.stats?.totalBroadcasts || 0; totalBc += bc; totalMem += g.memberCount; guildFields.push({ name: g.name, value: `👥 \`${g.memberCount}\` | 📢 \`${bc}\` | 🛡️ \`${gd?.admins?.length || 0}\` | 👑 \`${(gd?.owners?.length || 0) + 1}\` | 🔔 ${gd?.logChannelId ? '🟢' : '🔴'}`, inline: false }); });
+        await message.reply({ embeds: [makeEmbed(guild, { author: '👑 لوحة تحكم المالك', authorIcon: client.user.displayAvatarURL({ dynamic: true }), color: CONFIG.COLORS.GOLD, thumbnail: client.user.displayAvatarURL({ dynamic: true }), fields: [{ name: '🖥️ السيرفرات', value: `\`${guilds.size}\``, inline: true }, { name: '👥 إجمالي الأعضاء', value: `\`${totalMem}\``, inline: true }, { name: '📢 إجمالي البرودكاست', value: `\`${totalBc}\``, inline: true }, { name: '⚡ البينق', value: `\`${client.ws.ping}ms\``, inline: true }, { name: '⏱️ وقت التشغيل', value: `\`${formatUptime(client.uptime)}\``, inline: true }, { name: '📦 الإصدار', value: '`v2.1.0`', inline: true }, ...guildFields] })] });
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2073,30 +1575,9 @@ client.on('messageCreate', async (message) => {
 
     else if (cmd === 'restart') {
         if (!isOwner(message.author.id, guild.id)) return message.reply({ embeds: [errorEmbed(guild, '👑 هذا الأمر خاص بالمالك فقط')] });
-
         const ts = uid();
-        const rstMsg = await message.reply({
-            embeds: [makeEmbed(guild, {
-                author: '⚠️ إعادة تشغيل', color: CONFIG.COLORS.ERROR,
-                description: `متأكد تبي تسوي ريستارت؟\n\n• البوت بيطفى ويرجع يشتغل\n• الجدولات المحفوظة ما بتتأثر\n• وقت التشغيل: **${formatUptime(client.uptime)}**`,
-                footer: 'البوت بيرجع تلقائي لو على Railway أو PM2'
-            })],
-            components: [new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`rst_yes_${ts}`).setLabel('🔁 أعد التشغيل').setStyle(ButtonStyle.Danger),
-                new ButtonBuilder().setCustomId(`rst_no_${ts}`).setLabel('❌ إلغاء').setStyle(ButtonStyle.Secondary)
-            )]
-        });
-
-        try {
-            const int = await rstMsg.awaitMessageComponent({ filter: i => i.user.id === message.author.id, componentType: ComponentType.Button, time: 30000 });
-            if (int.customId === `rst_yes_${ts}`) {
-                await int.update({ embeds: [makeEmbed(guild, { author: '🔁 جاري إعادة التشغيل...', color: CONFIG.COLORS.SUCCESS, description: 'البوت بيرجع خلال ثواني' })], components: [] });
-                await sendLog(guild.id, CONFIG.COLORS.ERROR, 'إعادة تشغيل البوت', null, message.author.id);
-                await sleep(1500); process.exit(0);
-            } else {
-                await int.update({ embeds: [makeEmbed(guild, { author: '✓ تم الإلغاء', color: CONFIG.COLORS.PRIMARY })], components: [] });
-            }
-        } catch { rstMsg.edit({ embeds: [errorEmbed(guild, 'انتهى الوقت')], components: [] }).catch(() => { }); }
+        const rstMsg = await message.reply({ embeds: [makeEmbed(guild, { author: '⚠️ إعادة تشغيل', color: CONFIG.COLORS.ERROR, description: `متأكد تبي تسوي ريستارت؟\n\n• البوت بيطفى ويرجع يشتغل\n• الجدولات المحفوظة ما بتتأثر\n• وقت التشغيل: **${formatUptime(client.uptime)}**`, footer: 'البوت بيرجع تلقائي لو على Railway أو PM2' })], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`rst_yes_${ts}`).setLabel('🔁 أعد التشغيل').setStyle(ButtonStyle.Danger), new ButtonBuilder().setCustomId(`rst_no_${ts}`).setLabel('❌ إلغاء').setStyle(ButtonStyle.Secondary))] });
+        try { const int = await rstMsg.awaitMessageComponent({ filter: i => i.user.id === message.author.id, componentType: ComponentType.Button, time: 30000 }); if (int.customId === `rst_yes_${ts}`) { await int.update({ embeds: [makeEmbed(guild, { author: '🔁 جاري إعادة التشغيل...', color: CONFIG.COLORS.SUCCESS, description: 'البوت بيرجع خلال ثواني' })], components: [] }); await sendLog(guild.id, CONFIG.COLORS.ERROR, 'إعادة تشغيل البوت', null, message.author.id); await sleep(1500); process.exit(0); } else { await int.update({ embeds: [makeEmbed(guild, { author: '✓ تم الإلغاء', color: CONFIG.COLORS.PRIMARY })], components: [] }); } } catch { rstMsg.edit({ embeds: [errorEmbed(guild, 'انتهى الوقت')], components: [] }).catch(() => { }); }
     }
 });
 
